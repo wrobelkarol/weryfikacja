@@ -804,7 +804,7 @@ async function zapiszTeraz() {
   try {
     const r = await API.post('/api/zapisz', daneDoZapisu());
     const d = await r.json();
-    ustawStanZapisu('Zapisano ' + d.zapisano.slice(11));
+    ustawStanZapisu(d.komunikat || 'Zapisano ' + d.zapisano.slice(11), !!d.ostrzezenie);
     ustawStanWDrzewie(d.pobrano ? 'gotowe_zmiany' : 'w_trakcie');
     if (d.nowsze) toast(`Pomocnik poprawił na stronie www ${d.nowsze} z tych wycinków – kliknij „Odśwież”, żeby zobaczyć jego wersję.`);
   } catch (e) {

@@ -202,8 +202,13 @@ window.WWW = (() => {
     if (!r) throw new Error('tego rocznika nie ma na stronie');
     zalegle.set(cialo.sciezka, { plik: r.www, dane: cialo.dane });
     zapamietajZalegle();
+    const zapisano = teraz();
+    if (!token) {
+      return odpowiedz({ zapisano, pobrano: null, ostrzezenie: true,
+        komunikat: 'Zapisano tylko w tej przeglądarce – strona nie ma tokenu, poprawki nie idą na GitHuba.' });
+    }
     zaplanujWysylke(document.visibilityState === 'hidden');
-    return odpowiedz({ zapisano: teraz(), pobrano: null });
+    return odpowiedz({ zapisano, pobrano: null, komunikat: `Zapisano ${zapisano.slice(11)}, wysyłanie…` });
   }
 
   function zaplanujWysylke(odRazu = false) {
@@ -213,11 +218,7 @@ window.WWW = (() => {
   }
 
   async function wyslij(keepalive = false) {
-    if (wysylanie || !zalegle.size) return;
-    if (!token) {
-      stan('Zapisano tylko w tej przeglądarce – strona nie ma tokenu, poprawki nie idą na GitHuba.', true);
-      return;
-    }
+    if (wysylanie || !zalegle.size || !token) return;
     wysylanie = true;
     try {
       for (const [rocznik, z] of [...zalegle]) {
