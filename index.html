@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weryfikacja odczytów</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="styl.css?v=1792694838">
+</head>
+<body class="www">
+<header>
+  <h1>Weryfikacja odczytów</h1>
+  <span id="naglowek-folder" class="sciezka"></span>
+  <span id="licznik" class="licznik"></span>
+  <div class="pasek" title="Sprawdzone wycinki"><div id="pasek"></div></div>
+  <span id="stan-zapisu" class="stan-zapisu"></span>
+  <div class="przyciski">
+    <button id="b-pobierz" class="glowny tylko-lokalnie" disabled title="Pobierz plik xlsx z arkuszami Łacina i Polski">Pobierz xlsx</button>
+    <button id="b-wyloguj" class="tylko-www" title="Wyloguj z tej przeglądarki">Wyloguj</button>
+  </div>
+</header>
+
+<div class="uklad">
+  <aside id="boczny">
+    <div class="boczne-przyciski">
+      <button id="b-wgraj" class="tylko-lokalnie" title="Otwórz folder z wycinkami spoza drzewa">Wgraj skany…</button>
+      <button id="b-prompt" class="tylko-lokalnie" title="Prompt do wklejenia w Antigravity (z uzupełnioną ścieżką)">Prompt dla AI</button>
+      <button id="b-odswiez" title="Odśwież drzewo i bieżący folder (np. gdy AI skończyło)">Odśwież</button>
+      <button id="b-wyslij" class="tylko-lokalnie" title="Wyślij pocięte wycinki, odczyty AI i poprawki na stronę www dla pomocnika">Wyślij na stronę</button>
+    </div>
+    <div id="drzewo" class="drzewo"></div>
+    <ul class="legenda">
+      <li class="tylko-lokalnie"><span class="ikona stan-nie_pociete">–</span> skany nie pocięte</li>
+      <li><span class="ikona stan-pociete">○</span> pocięte, czeka na AI</li>
+      <li><span class="ikona stan-ai_w_toku">◐</span> AI w trakcie odczytu</li>
+      <li><span class="ikona stan-ai">●</span> odczyt AI gotowy</li>
+      <li><span class="ikona stan-w_trakcie">●</span> w trakcie weryfikacji</li>
+      <li><span class="ikona stan-gotowe">✓</span> gotowe (pobrane xlsx)</li>
+    </ul>
+  </aside>
+
+  <main id="tresc">
+    <div id="komunikaty"></div>
+    <div id="narzedzia" class="narzedzia ukryta">
+      <label>Pokaż:
+        <select id="filtr">
+          <option value="wszystkie">wszystkie wycinki</option>
+          <option value="niesprawdzone">niesprawdzone</option>
+          <option value="flagi">z podświetleniami</option>
+        </select>
+      </label>
+      <button id="b-zwin">Zwiń wszystkie pola</button>
+      <span class="podpowiedz"><span class="probka podejrzane"></span> coś się nie zgadza (najedź myszką na pole)
+        <span class="probka niepewne"></span> AI nie było pewne odczytu</span>
+    </div>
+    <div id="karty"></div>
+    <div id="pusto" class="pusto">
+      <h2>Wybierz rocznik w drzewie po lewej</h2>
+      <p class="tylko-www">Pod każdym wycinkiem skanu są pola odczytane przez AI – po łacinie i po polsku. Porównaj je
+        z wycinkiem (kliknięcie powiększa), popraw, co się nie zgadza, i kliknij <b>Oznacz jako sprawdzone</b>.
+        Pola z pomarańczową ramką mogą być błędne (najedź na nie myszką), żółte – AI nie było pewne odczytu.
+        Poprawki zapisują się same.</p>
+      <ol class="tylko-lokalnie">
+        <li>Potnij skany rocznika w Tartaku (powstaje folder <b>pocięte</b>).</li>
+        <li>Kliknij rocznik po lewej, potem <b>Prompt dla AI</b> – skopiuj i wklej w Antigravity.</li>
+        <li>Gdy AI skończy, kliknij <b>Odśwież</b>. Pod każdym wycinkiem zobaczysz pola po łacinie i po polsku.</li>
+        <li>Popraw, co trzeba (zapisuje się samo), i kliknij <b>Pobierz xlsx</b>.</li>
+      </ol>
+    </div>
+  </main>
+</div>
+
+<div id="okno" class="okno ukryta" role="dialog" aria-modal="true">
+  <div class="okno-tresc">
+    <h2 id="okno-tytul"></h2>
+    <div id="okno-cialo"></div>
+    <div class="okno-przyciski" id="okno-przyciski"></div>
+  </div>
+</div>
+<div id="toast" class="toast ukryta"></div>
+<script src="www.js?v=1792694838"></script>
+<script src="app.js?v=1792694838"></script>
+</body>
+</html>
