@@ -48,6 +48,7 @@ let POLA = [], TYPY = {}, RODZAJE = {};
 const st = {
   sciezka: null, opis: null, wycinki: [], mapa: new Map(), flagi: new Map(), aiZmieniony: null,
   brudne: false, zapisTimer: null, flagiTimer: null, otwarte: true, filtr: 'wszystkie', drzewo: null, edycja: null,
+  kolumna: 'lacina',     // kolumna, w której zostaje strzałka w dół/górę po przejściu przez pole wspólne
 };
 const RODZAJE_POL = {};
 
@@ -844,6 +845,28 @@ function obsluzZmiane(e) {
   poZmianie(karta, w);
 }
 
+/* Strzałka w dół/górę w polu przechodzi do pola w wierszu niżej/wyżej, w tej samej kolumnie (łacina albo
+   polski). W polu wielowierszowym dopiero z końca/początku tekstu. Na listach wyboru strzałka też przechodzi
+   dalej, a nie zmienia wartości (zmiana: myszką, Alt+↓ albo wpisaniem pierwszej litery). */
+function strzalki(e) {
+  if (!['ArrowDown', 'ArrowUp'].includes(e.key) || e.altKey || e.ctrlKey || e.shiftKey || e.metaKey) return;
+  const t = e.target;
+  if (!t.dataset || !t.dataset.pole || !t.closest('table.pola')) return;
+  const wDol = e.key === 'ArrowDown';
+  if (t.tagName === 'TEXTAREA' && (wDol ? t.selectionEnd < t.value.length : t.selectionStart > 0)) return;
+  if (t.dataset.jezyk !== 'oba') st.kolumna = t.dataset.jezyk;
+  const kolumna = t.dataset.jezyk === 'oba' ? st.kolumna : t.dataset.jezyk;
+  for (let r = t.closest('tr'); (r = wDol ? r.nextElementSibling : r.previousElementSibling);) {
+    const cel = r.querySelector(`[data-pole][data-jezyk="${kolumna}"]`) || r.querySelector('[data-pole]');
+    if (!cel) continue;
+    e.preventDefault();
+    cel.focus();
+    if (cel.tagName !== 'SELECT') cel.setSelectionRange(cel.value.length, cel.value.length);
+    return;
+  }
+  if (t.tagName === 'SELECT') e.preventDefault();      // ostatnie pole karty: lista zostaje bez zmian
+}
+
 function zaplanujZapis() {
   st.brudne = true;
   ustawStanZapisu('Niezapisane zmiany…');
@@ -1058,6 +1081,7 @@ async function start() {
   $('#karty').addEventListener('change', obsluzZmiane);
   $('#karty').addEventListener('focusin', zapamietajEdycje);
   $('#karty').addEventListener('focusout', () => { st.edycja = null; });
+  $('#karty').addEventListener('keydown', strzalki);
   $('#b-pobierz').addEventListener('click', pobierz);
   $('#b-prompt').addEventListener('click', pokazPrompt);
   $('#b-wgraj').addEventListener('click', pokazWgraj);
