@@ -152,7 +152,7 @@ function normalizujWspolne(klucz, v) {
     const kod = Object.keys(TYPY).find((t) => TYPY[t] === s || t === s.replace(/\s+/g, '_'));
     if (kod) return kod;
   }
-  if (klucz === 'miesiac') {           // "Januarius.", "styczeń", "1" -> "1"
+  if (klucz === 'miesiac' || klucz === 'miesiac_pogrzebu') {           // "Januarius.", "styczeń", "1" -> "1"
     const n = miesiacZ(v);
     if (n) return String(n);
   }
@@ -163,6 +163,19 @@ const NAZWISKA = ['zm_nazwisko', 'zm_rodowe', 'oj_nazwisko', 'ma_rodowe', 'mz_na
 
 const NAZWY_MIESIECY = ['styczeń', 'luty', 'marzec', 'kwiecień', 'maj', 'czerwiec', 'lipiec', 'sierpień', 'wrzesień',
   'październik', 'listopad', 'grudzień'];
+
+/* Miesiąc pogrzebu: wpisany w polu (albo w dniu pogrzebu jako „3/2”); gdy go nie ma, ten sam co zgonu,
+   a gdy dzień pogrzebu jest wcześniejszy niż dzień zgonu - następny (zgon 31 stycznia, pogrzeb 3 lutego). */
+function miesiacPogrzebu(w) {
+  const L = w.lacina;
+  const [dp, mp] = dzienMiesiac(L.dzien_pogrzebu);
+  const jawny = miesiacZ(L.miesiac_pogrzebu) || mp;
+  if (jawny) return { n: jawny, opis: 'wpisany' };
+  const [dz, mz] = dzienMiesiac(L.dzien_zgonu);
+  const m = mz || miesiacZ(L.miesiac);
+  if (!m) return null;
+  return dz !== null && dp !== null && dp < dz ? { n: (m % 12) + 1, opis: 'następny po zgonie' } : { n: m, opis: 'jak zgonu' };
+}
 
 /* Miesiąc dla aktów, przy których nie jest napisany: z daty "28/2" albo z najbliższego wcześniejszego
    aktu (w księdze nazwa miesiąca stoi tylko nad pierwszym aktem miesiąca). Taki miesiąc jest
@@ -321,7 +334,9 @@ function obliczFlagi() {
     if (m && poprzMiesiac && m < poprzMiesiac) dodaj('miesiac', `miesiąc ${m} po miesiącu ${poprzMiesiac} z wcześniejszego aktu`);
     const [dz, mz] = dzienMiesiac(L.dzien_zgonu);
     if (mz && m && mz !== m && !w.miesiacAuto) dodaj('miesiac', `data zgonu zapisana jako ${L.dzien_zgonu}, a miesiąc ${m}`);
-    const [dp, mp] = dzienMiesiac(L.dzien_pogrzebu);
+    const [dp, mpZapis] = dzienMiesiac(L.dzien_pogrzebu);
+    const mpPole = miesiacZ(L.miesiac_pogrzebu);
+    const mp = mpPole || mpZapis;          // miesiąc pogrzebu: z pola albo z zapisu dnia „3/2”
     if (L.dzien_zgonu && dz === null) dodaj('dzien_zgonu', 'dzień zgonu to nie liczba');
     if (L.dzien_pogrzebu && dp === null) dodaj('dzien_pogrzebu', 'dzień pogrzebu to nie liczba');
     const mies = mz || miesiac;
@@ -339,8 +354,10 @@ function obliczFlagi() {
       if (!pogrzeb) dodaj('dzien_pogrzebu', 'niemożliwa data pogrzebu');
       else {
         const dni = Math.round((pogrzeb - zgon) / 864e5);
-        if (dni > 5) dodaj('dzien_pogrzebu', `pogrzeb ${dni} dni po zgonie`);
-        else if (dni === 0) dodaj('dzien_pogrzebu', 'pogrzeb tego samego dnia co zgon');
+        if (dni > 5 || dni < 0) {
+          dodaj('dzien_pogrzebu', dni < 0 ? 'pogrzeb przed zgonem' : `pogrzeb ${dni} dni po zgonie`);
+          if (mpPole) dodaj('miesiac_pogrzebu', `miesiąc pogrzebu ${mpPole}: pogrzeb ${dni} dni po zgonie`);
+        } else if (dni === 0) dodaj('dzien_pogrzebu', 'pogrzeb tego samego dnia co zgon');
       }
     }
     if (zgon && poprzData && zgon < poprzData) dodaj('dzien_zgonu', 'data zgonu wcześniejsza niż w poprzednim akcie');
@@ -740,6 +757,13 @@ function zaznaczFlagiKarty(karta, w) {
       if (e.value !== w.lacina.miesiac && document.activeElement !== e) e.value = w.lacina.miesiac;
       e.classList.toggle('auto', w.miesiacAuto);
       if (w.miesiacAuto) tytuly.push('uzupełnione automatycznie z wcześniejszego aktu (albo z daty „dzień/miesiąc”) – zmień, jeśli trzeba');
+    }
+    if (e.dataset.pole === 'miesiac_pogrzebu' && e.options) {
+      // puste pole = miesiąc liczony automatycznie; napis pokazuje, jaki wyjdzie (wpisz tylko, gdy inny)
+      const ef = miesiacPogrzebu(w);
+      e.options[0].textContent = ef && ef.opis !== 'wpisany'
+        ? `— ${ef.opis}: ${NAZWY_MIESIECY[ef.n - 1]}` : '— tak jak zgonu';
+      tytuly.push('Zostaw puste, gdy pogrzeb był w tym samym miesiącu co zgon. Wybierz miesiąc, gdy był w innym (np. zgon 31 stycznia, pogrzeb 3 lutego).');
     }
     e.title = tytuly.join('\n');
     const ptaszek = e.nextElementSibling;
