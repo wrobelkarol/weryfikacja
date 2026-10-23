@@ -180,6 +180,32 @@ function miesiacPogrzebu(w) {
 /* Miesiąc dla aktów, przy których nie jest napisany: z daty "28/2" albo z najbliższego wcześniejszego
    aktu (w księdze nazwa miesiąca stoi tylko nad pierwszym aktem miesiąca). Taki miesiąc jest
    oznaczony jako automatyczny - zmienia się sam, gdy poprawisz miesiąc wcześniej. */
+const TYPY_DZIECI = ['dziecko', 'dziecko_nieslubne', 'martwe_urodzenie'];
+
+function formaZenska(n) {          // córka: Rudecki -> Rudecka, Ciepły -> Ciepła; Rzepka, Morek bez zmian
+  return /(sk|ck|dzk)i$/.test(n) || /[^aeiouyąęó]y$/.test(n) ? n.slice(0, -1) + 'a' : n;
+}
+
+/* Nazwisko dziecka: w akcie zwykle nie stoi przy imieniu, więc bierzemy je od ojca (dziecko nieślubne -
+   od matki), u dziewczynki w formie żeńskiej. Zmienia się samo, gdy poprawisz nazwisko rodzica;
+   nazwisko wpisane albo poprawione ręcznie zostaje bez zmian. */
+function uzupelnijNazwiskaDzieci() {
+  for (const w of st.wycinki) {
+    w.nazwiskoAuto = false;
+    if (w.rodzaj !== 'akt' || !TYPY_DZIECI.includes(w.lacina.typ)) continue;
+    if (w.edytowane.has('lacina.zm_nazwisko') || w.edytowane.has('polski.zm_nazwisko')) continue;
+    const z = (d) => {
+      const n = w.lacina.typ === 'dziecko_nieslubne' ? (d.ma_rodowe || d.oj_nazwisko) : d.oj_nazwisko;
+      return n && w.lacina.plec === 'K' && n === d.oj_nazwisko ? formaZenska(n) : (n || '');
+    };
+    const lat = z(w.lacina), pol = z(w.polski) || lat;
+    if (!lat && !pol) continue;          // brak nazwiska rodzica: zostaje to, co odczytało AI
+    w.lacina.zm_nazwisko = lat || pol;
+    w.polski.zm_nazwisko = pol;
+    w.nazwiskoAuto = true;
+  }
+}
+
 function uzupelnijMiesiace() {
   let ostatni = null;
   for (const w of st.wycinki) {
@@ -510,6 +536,7 @@ async function otworzFolder(sciezka) {
   } catch (e) {
     return toast('Nie udało się otworzyć folderu: ' + e.message);
   }
+  const tenSam = st.sciezka === d.sciezka;      // "Odśwież" tego samego rocznika: strona zostaje w miejscu
   st.sciezka = d.sciezka;
   st.opis = d.opis;
   st.aiZmieniony = d.ai_zmieniony;
@@ -551,10 +578,17 @@ async function otworzFolder(sciezka) {
   $('#narzedzia').classList.toggle('ukryta', !st.wycinki.length);
   $('#b-pobierz').disabled = !st.wycinki.length;
   uzupelnijMiesiace();
+  uzupelnijNazwiskaDzieci();
   obliczFlagi();
   rysujKarty();
   $$('.wezel').forEach((w) => w.classList.toggle('aktywny', w.dataset.sciezka === d.opis.rocznik));
-  window.scrollTo(0, 0);
+  if (!tenSam) {
+    // powrót do rozpoczętego rocznika: od razu pierwszy niesprawdzony wycinek
+    const pierwszy = st.wycinki.some((w) => w.sprawdzony) && st.wycinki.find((w) => !w.sprawdzony);
+    const karta = pierwszy && document.getElementById('w-' + pierwszy.wycinek);
+    if (karta) requestAnimationFrame(() => karta.scrollIntoView({ block: 'start' }));
+    else window.scrollTo(0, 0);
+  }
   if (uzupelnione) zaplanujZapis();
 }
 
@@ -758,6 +792,13 @@ function zaznaczFlagiKarty(karta, w) {
       e.classList.toggle('auto', w.miesiacAuto);
       if (w.miesiacAuto) tytuly.push('uzupełnione automatycznie z wcześniejszego aktu (albo z daty „dzień/miesiąc”) – zmień, jeśli trzeba');
     }
+    if (e.dataset.pole === 'zm_nazwisko' && e.tagName === 'INPUT') {
+      // nazwisko dziecka liczone z nazwiska rodzica odświeża się, gdy poprawisz rodzica
+      const v = w[e.dataset.jezyk].zm_nazwisko;
+      if (w.nazwiskoAuto && e.value !== v && document.activeElement !== e) e.value = v;
+      e.classList.toggle('auto', w.nazwiskoAuto);
+      if (w.nazwiskoAuto) tytuly.push('uzupełnione automatycznie z nazwiska ojca (u dziecka nieślubnego – matki); zmienia się samo, gdy poprawisz rodzica, albo wpisz ręcznie');
+    }
     if (e.dataset.pole === 'miesiac_pogrzebu' && e.options) {
       // puste pole = miesiąc liczony automatycznie; napis pokazuje, jaki wyjdzie (wpisz tylko, gdy inny)
       const ef = miesiacPogrzebu(w);
@@ -784,6 +825,7 @@ function poZmianie(karta, w) {
   clearTimeout(st.flagiTimer);
   st.flagiTimer = setTimeout(() => {
     uzupelnijMiesiace();
+    uzupelnijNazwiskaDzieci();
     obliczFlagi();
     for (const k of $$('.karta')) zaznaczFlagiKarty(k, st.mapa.get(k.dataset.wycinek));
     odswiezLiczniki();

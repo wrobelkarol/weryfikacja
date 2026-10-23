@@ -107,7 +107,7 @@ table.pola textarea { resize: vertical; min-height: 30px; overflow: hidden; line
 table.pola input::placeholder, table.pola textarea::placeholder { color: var(--szary); opacity: .75; font-style: italic; }
 table.pola .podejrzane { border: 2px solid var(--uwaga); padding: 2px 6px; }
 table.pola .niepewne { background: var(--niepewne-tlo); }
-table.pola select.auto { font-style: italic; color: var(--szary); }
+table.pola select.auto, table.pola input.auto { font-style: italic; color: var(--szary); }
 tr.wiersz-podejrzany th.etykieta { color: var(--uwaga); }
 /* ✓ po prawej stronie pola poprawionego przez człowieka (inne niż odczyt AI) */
 .z-ptaszkiem { display: flex; align-items: flex-start; gap: 3px; }
