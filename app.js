@@ -196,7 +196,8 @@ function uzupelnijNazwiskaDzieci() {
     if (w.rodzaj !== 'akt' || !TYPY_DZIECI.includes(w.lacina.typ)) continue;
     if (w.edytowane.has('lacina.zm_nazwisko') || w.edytowane.has('polski.zm_nazwisko')) continue;
     const z = (d) => {
-      const n = w.lacina.typ === 'dziecko_nieslubne' ? (d.ma_rodowe || d.oj_nazwisko) : d.oj_nazwisko;
+      const bezOjca = !d.oj_imie && !d.oj_nazwisko;      // ojca nie ma w akcie (np. martwo urodzone dziecko nieślubne)
+      const n = w.lacina.typ === 'dziecko_nieslubne' || bezOjca ? (d.ma_rodowe || d.oj_nazwisko) : d.oj_nazwisko;
       return n && w.lacina.plec === 'K' && n === d.oj_nazwisko ? formaZenska(n) : (n || '');
     };
     const lat = z(w.lacina), pol = z(w.polski) || lat;
