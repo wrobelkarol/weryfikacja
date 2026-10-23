@@ -196,6 +196,7 @@ function normalizuj(wpis, plik, wycinek) {
     uwagi: tekst(wpis.uwagi), sprawdzony: !!wpis.sprawdzony,
     edytowane: new Set(Array.isArray(wpis.edytowane_pola) ? wpis.edytowane_pola : []),  // np. 'polski.zm_imie'
     zmieniono: +wpis.zmieniono || 0,     // czas ostatniej poprawki: przy łączeniu z poprawkami ze strony www wygrywa nowsza
+    ai: null,                            // odczyt AI do porównania (zapamietajAi)
     miesiacAuto: false,
   };
   for (const [k, , rodzaj] of POLA) {
@@ -229,10 +230,15 @@ function daneDoZapisu() {
    albo zmieniłeś, zostają; pozostałe zawsze biorą wartość z odczytu AI (np. gdy AI skończyło
    czytać już po tym, jak coś wpisałeś). */
 function polacz(z, a, plik, wycinek) {
-  if (!z) return { w: normalizuj(a, plik, wycinek), zmiany: 0, zdjete: false };
+  if (!z) {
+    const w = normalizuj(a, plik, wycinek);
+    if (a) zapamietajAi(w, w);
+    return { w, zmiany: 0, zdjete: false };
+  }
   const w = normalizuj(z, plik, wycinek);
   if (!a) return { w, zmiany: 0, zdjete: false };
   const ai = normalizuj(a, plik, wycinek);
+  zapamietajAi(w, ai);
   // zapis z pierwszej wersji programu nie pamiętał, które pola zmieniłeś - wtedy Twoje są wszystkie niepuste
   const staryZapis = !Array.isArray(z.edytowane_pola) && !!z.edytowany;
   const twoje = (id, wartosc) => {
@@ -254,6 +260,38 @@ function polacz(z, a, plik, wycinek) {
   const zdjete = zmiany > 0 && w.sprawdzony;
   if (zdjete) w.sprawdzony = false;          // sprawdzałeś inne wartości niż te, które są teraz
   return { w, zmiany, zdjete };
+}
+
+/* Odczyt AI zostaje obok poprawek, żeby przy polu poprawionym przez człowieka pokazać ✓ (i co odczytało AI). */
+function zapamietajAi(w, ai) {
+  w.ai = { lacina: { ...ai.lacina }, polski: { ...ai.polski }, uwagi: ai.uwagi };
+}
+
+/* Pole poprawione przez człowieka: ktoś je zmienił i jest teraz inne niż w odczycie AI
+   (wpisane i cofnięte do tego samego nie liczy się; bez odczytu AI liczy się każde wpisane). */
+function poprawione(w, klucz, jezyk) {
+  if (klucz === 'uwagi') return w.edytowane.has('uwagi') && (!w.ai || w.uwagi.trim() !== (w.ai.uwagi || '').trim());
+  const j = jezyk === 'oba' ? 'lacina' : jezyk;
+  if (!w.edytowane.has(`${j}.${klucz}`)) return false;
+  return !w.ai || (w[j][klucz] || '').trim() !== (w.ai[j][klucz] || '').trim();
+}
+
+function opisPoprawki(w, klucz, jezyk) {
+  if (!w.ai) return 'Poprawione (wpisane ręcznie, bez odczytu AI)';
+  const j = jezyk === 'oba' ? 'lacina' : jezyk;
+  let ai = klucz === 'uwagi' ? w.ai.uwagi : w.ai[j][klucz];
+  if (klucz === 'typ' && TYPY[ai]) ai = TYPY[ai];
+  if (klucz === 'miesiac' && ai) ai = `${ai} – ${NAZWY_MIESIECY[+ai - 1] || ai}`;
+  return ai ? `Poprawione – AI odczytało: „${ai}”` : 'Poprawione – AI zostawiło to pole puste';
+}
+
+function liczPoprawione(w) {
+  let n = poprawione(w, 'uwagi') ? 1 : 0;
+  for (const [k, , rodzaj] of POLA) {
+    if (rodzaj === 'tekst' || rodzaj === 'dlugi') n += poprawione(w, k, 'lacina') + poprawione(w, k, 'polski');
+    else n += poprawione(w, k, 'oba');
+  }
+  return n;
 }
 
 // ---------------------------------------------------------------- podejrzane miejsca (reguły)
@@ -591,6 +629,7 @@ function karta(w) {
       el('span', { text: `Wycinek ${w.wycinek}` }),
       el('span', { class: 'opis', text: opisKarty(w) }),
       el('span', { class: 'znaczek ukryta' }),
+      el('span', { class: 'znaczek ok poprawki ukryta', title: 'Pola poprawione względem odczytu AI – przy każdym z nich jest ✓' }),
       el('span', { class: 'prawo' }, rodzaj, sprawdzone[0])),
     obraz, szczegoly,
     el('div', { class: 'stopka' }, sprawdzone[1]));
@@ -628,7 +667,10 @@ function rysujPola(karta) {
     tr.dataset.pole = klucz;
     return tr;
   };
-  const oba = (e) => el('td', { colspan: '2' }, e);
+  // komórka z polem i miejscem na ✓ po prawej (pole poprawione przez człowieka)
+  const kom = (e, colspan) => el('td', colspan ? { colspan } : {},
+    el('div', { class: 'z-ptaszkiem' }, e, el('span', { class: 'ptaszek', text: '✓', 'aria-hidden': 'true' })));
+  const oba = (e) => kom(e, '2');
   if (w.rodzaj === 'akt') {
     for (const [k, etykieta, rodzaj] of POLA) {
       if (rodzaj === 'wspolne') wiersze.push(wiersz(etykieta, k, oba(pole(w, k, 'oba', false))));
@@ -640,13 +682,13 @@ function rysujPola(karta) {
           ...NAZWY_MIESIECY.map((n, i) => [String(i + 1), `${i + 1} – ${n}`])]))));
       } else {
         const dlugi = rodzaj === 'dlugi';
-        wiersze.push(wiersz(etykieta, k, el('td', {}, pole(w, k, 'lacina', dlugi)), el('td', {}, pole(w, k, 'polski', dlugi))));
+        wiersze.push(wiersz(etykieta, k, kom(pole(w, k, 'lacina', dlugi)), kom(pole(w, k, 'polski', dlugi))));
       }
     }
   } else {
-    wiersze.push(wiersz('Tekst', 'tekst', el('td', {}, pole(w, 'tekst', 'lacina', true)), el('td', {}, pole(w, 'tekst', 'polski', true))));
+    wiersze.push(wiersz('Tekst', 'tekst', kom(pole(w, 'tekst', 'lacina', true)), kom(pole(w, 'tekst', 'polski', true))));
     if (w.rodzaj === 'poswiadczenie') {
-      wiersze.push(wiersz('Ksiądz', 'ksiadz', el('td', {}, pole(w, 'ksiadz', 'lacina', false)), el('td', {}, pole(w, 'ksiadz', 'polski', false))));
+      wiersze.push(wiersz('Ksiądz', 'ksiadz', kom(pole(w, 'ksiadz', 'lacina', false)), kom(pole(w, 'ksiadz', 'polski', false))));
     }
   }
   wiersze.push(wiersz('Uwagi', 'uwagi', oba(pole(w, 'uwagi', 'oba', true, 'problem z wycinkiem, Twoje notatki…'))));
@@ -675,6 +717,12 @@ function zaznaczFlagiKarty(karta, w) {
     znaczek.textContent = `do sprawdzenia: ${ile}`;
     znaczek.title = Object.values(f).flat().filter((v, i, a) => a.indexOf(v) === i).join('\n');
   }
+  const ilePoprawek = liczPoprawione(w);
+  const poprawki = $('.poprawki', karta);
+  if (poprawki) {
+    poprawki.classList.toggle('ukryta', ilePoprawek === 0);
+    poprawki.textContent = `✓ poprawione: ${ilePoprawek}`;
+  }
   for (const e of $$('[data-pole]', karta)) {
     if (e.tagName === 'TR') {
       e.classList.toggle('wiersz-podejrzany', !!f[e.dataset.pole]);
@@ -693,6 +741,12 @@ function zaznaczFlagiKarty(karta, w) {
       if (w.miesiacAuto) tytuly.push('uzupełnione automatycznie z wcześniejszego aktu (albo z daty „dzień/miesiąc”) – zmień, jeśli trzeba');
     }
     e.title = tytuly.join('\n');
+    const ptaszek = e.nextElementSibling;
+    if (ptaszek && ptaszek.classList.contains('ptaszek')) {
+      const zmienione = poprawione(w, e.dataset.pole, e.dataset.jezyk);
+      ptaszek.classList.toggle('widoczny', zmienione);
+      ptaszek.title = zmienione ? opisPoprawki(w, e.dataset.pole, e.dataset.jezyk) : '';
+    }
   }
 }
 
@@ -836,6 +890,7 @@ function zastosujFiltr(tylkoKlasy = false) {
     let widoczna = true;
     if (st.filtr === 'niesprawdzone') widoczna = !w.sprawdzony;
     if (st.filtr === 'flagi') widoczna = st.flagi.has(w.wycinek) || w.niepewne.length > 0;
+    if (st.filtr === 'poprawione') widoczna = liczPoprawione(w) > 0;
     // karta, którą właśnie edytujesz, nie znika spod kursora
     if (tylkoKlasy && !widoczna && k.contains(document.activeElement)) continue;
     k.classList.toggle('ukryta', !widoczna);

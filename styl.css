@@ -109,6 +109,12 @@ table.pola .podejrzane { border: 2px solid var(--uwaga); padding: 2px 6px; }
 table.pola .niepewne { background: var(--niepewne-tlo); }
 table.pola select.auto { font-style: italic; color: var(--szary); }
 tr.wiersz-podejrzany th.etykieta { color: var(--uwaga); }
+/* ✓ po prawej stronie pola poprawionego przez człowieka (inne niż odczyt AI) */
+.z-ptaszkiem { display: flex; align-items: flex-start; gap: 3px; }
+.z-ptaszkiem > input, .z-ptaszkiem > textarea, .z-ptaszkiem > select { flex: 1 1 auto; min-width: 0; }
+.ptaszek { flex: 0 0 16px; text-align: center; color: var(--ok); font-weight: 700; line-height: 30px; visibility: hidden; cursor: help; }
+.ptaszek.widoczny { visibility: visible; }
+.podpowiedz .ptaszek { line-height: inherit; flex: none; cursor: default; }
 .ukryta { display: none !important; }
 /* strona www dla pomocnika (body.www): bez przycisków, które działają tylko na Twoim komputerze */
 .tylko-www { display: none !important; }
