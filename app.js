@@ -941,11 +941,48 @@ async function pobierz() {
     ustawStanWDrzewie('gotowe');
     const niesprawdzone = st.wycinki.filter((w) => !w.sprawdzony).length;
     toast(`Pobrano ${nazwa}` + (niesprawdzone ? ` (nieoznaczonych jako sprawdzone: ${niesprawdzone})` : ''));
+    pokazPropozycjeSlowniczka();
   } catch (e) {
     toast('Nie udało się zrobić pliku xlsx: ' + e.message);
   } finally {
     przycisk.disabled = false;
   }
+}
+
+/* Po pobraniu xlsx: propozycje do słowniczka (prompt dla AI) z aktów oznaczonych jako sprawdzone.
+   Zaznaczone serwer dopisuje do slowniczek.md, odznaczone zapamiętuje i już ich nie proponuje. */
+async function pokazPropozycjeSlowniczka() {
+  let d;
+  try {
+    d = await API.get('/api/slowniczek?sciezka=' + enc(st.sciezka));
+  } catch (e) {
+    return toast('Nie udało się przygotować propozycji do słowniczka: ' + e.message);
+  }
+  if (!d.propozycje.length) return;
+  const pozycje = d.propozycje.map((p) => {
+    const pole = el('input', { type: 'checkbox', checked: true });
+    const ile = p.wycinki.length;
+    return { p, pole, wiersz: el('label', { class: 'propozycja' }, pole,
+      el('span', {}, p.opis, el('small', { text: ` – ${ile === 1 ? 'wycinek' : 'wycinki'} ${p.wycinki.join(', ')}` }))) };
+  });
+  okno('Propozycje do słowniczka', [
+    el('p', { text: 'Z aktów oznaczonych jako sprawdzone. Zaznaczone dopiszę do słowniczka, który AI dostaje w prompcie '
+      + 'przy następnych rocznikach. Odznaczonych nie będę już proponować.' }),
+    el('div', { class: 'propozycje' }, pozycje.map((x) => x.wiersz)),
+  ], [
+    el('button', { class: 'glowny', text: 'Dopisz zaznaczone', onclick: async () => {
+      try {
+        const r = await API.post('/api/slowniczek', {
+          przyjete: pozycje.filter((x) => x.pole.checked).map((x) => x.p),
+          odrzucone: pozycje.filter((x) => !x.pole.checked).map((x) => x.p.klucz),
+        });
+        zamknijOkno();
+        toast(`Dopisano do słowniczka: ${(await r.json()).dopisano}.`);
+      } catch (e) {
+        toast('Nie udało się dopisać do słowniczka: ' + e.message);
+      }
+    } }),
+  ]);
 }
 
 // ---------------------------------------------------------------- okna: prompt, wgraj

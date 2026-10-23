@@ -139,6 +139,10 @@ body.www .tylko-lokalnie { display: none !important; }
 #okno-cialo p { margin: 0; color: var(--szary); }
 #okno-cialo ol { margin: 0; padding-left: 22px; }
 #okno-cialo a { color: var(--akcent); font-weight: 600; }
+.propozycje { display: flex; flex-direction: column; gap: 6px; }
+.propozycja { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; line-height: 1.4; }
+#okno-cialo .propozycja input { width: auto; flex: none; margin: 3px 0 0; }
+.propozycja small { color: var(--szary); }
 #okno-cialo textarea { width: 100%; min-height: 50vh; font: 13px/1.4 Consolas, monospace; padding: 8px; border: 1px solid var(--linia);
               border-radius: 6px; background: var(--pole); }
 #okno-cialo input { width: 100%; padding: 7px 9px; border: 1px solid var(--linia); border-radius: 6px; background: var(--pole); }
