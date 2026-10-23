@@ -291,6 +291,8 @@ function polacz(z, a, plik, wycinek) {
   for (const jezyk of ['lacina', 'polski']) {
     for (const [k] of POLA) {
       if (twoje(`${jezyk}.${k}`, w[jezyk][k]) || w[jezyk][k] === ai[jezyk][k]) continue;
+      // nazwisko dziecka liczy program (uzupelnijNazwiskaDzieci) - to nie jest nowy odczyt AI
+      if (k === 'zm_nazwisko' && TYPY_DZIECI.includes(w.lacina.typ)) continue;
       w[jezyk][k] = ai[jezyk][k];
       zmiany++;
     }
