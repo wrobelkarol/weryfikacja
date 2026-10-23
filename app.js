@@ -787,10 +787,39 @@ function zapamietajEdycje(e) {
   };
 }
 
+const wRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const SAMOGLOSKA_NA_KONCU = /[aeiouyąęó]$/i;
+
+/* Słowo z pola także w odmienionej formie: w tekście po polsku jest "syn Jana", "po Kazimierzu Skrzyńskim",
+   a w polu "Jan", "Skrzyński". Rdzeń = słowo bez końcowej samogłoski, do niego dowolna krótka końcówka;
+   w poprawionym słowie zostaje ta sama końcówka ("Mojawy" -> "Morawy" po poprawce "Mojawa" -> "Morawa"). */
+function zamienOdmiane(tekstZ, stare, nowe) {
+  const rdzen = (s) => (SAMOGLOSKA_NA_KONCU.test(s) && s.length > 3 ? s.slice(0, -1) : s);
+  const rs = rdzen(stare);
+  const rn = SAMOGLOSKA_NA_KONCU.test(stare) && stare.length > 3 ? rdzen(nowe) : nowe;
+  if (rs.length < 3 || rs === rn) {           // krótkie słowo albo poprawiona sama końcówka: tylko ten sam zapis
+    return tekstZ.replace(new RegExp(`(?<![\\p{L}\\p{N}])${wRegex(stare)}(?![\\p{L}\\p{N}])`, 'gu'), () => nowe);
+  }
+  let wynik = tekstZ.replace(new RegExp(`(?<![\\p{L}\\p{N}])${wRegex(rs)}(\\p{Ll}{0,4})(?![\\p{L}\\p{N}])`, 'gu'),
+    (_, koncowka) => rn + koncowka);
+  // ruchome "e": Marek -> Marku, Paweł -> Pawła, Gnojek -> Gnojka
+  const bezE = (s) => (/e[kcł]$/.test(s) && s.length > 3 ? s.slice(0, -2) + s.slice(-1) : null);
+  if (bezE(stare)) {
+    wynik = wynik.replace(new RegExp(`(?<![\\p{L}\\p{N}])${wRegex(bezE(stare))}(\\p{Ll}{1,4})(?![\\p{L}\\p{N}])`, 'gu'),
+      (_, koncowka) => (bezE(nowe) || nowe) + koncowka);
+  }
+  return wynik;
+}
+
 function zamienSlowo(tekstZ, stare, nowe) {
-  if (!tekstZ || !stare || !stare.trim()) return tekstZ;
-  const wzor = stare.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return tekstZ.replace(new RegExp(`(?<![\\p{L}\\p{N}])${wzor}(?![\\p{L}\\p{N}])`, 'gu'), () => nowe.trim());
+  stare = (stare || '').trim();
+  nowe = (nowe || '').trim();
+  if (!tekstZ || !stare || !nowe) return tekstZ;     // puste pole (np. w trakcie pisania od nowa) nie psuje tekstu
+  const s = stare.split(/\s+/), n = nowe.split(/\s+/);
+  if (s.length !== n.length) {                        // inna liczba słów: tylko dokładnie ten sam zapis
+    return tekstZ.replace(new RegExp(`(?<![\\p{L}\\p{N}])${wRegex(stare)}(?![\\p{L}\\p{N}])`, 'gu'), () => nowe);
+  }
+  return s.reduce((t, slowo, i) => (slowo === n[i] ? t : zamienOdmiane(t, slowo, n[i])), tekstZ);
 }
 
 function poprawTekstAktu(w, karta, edycja, nowe, jezyki) {
