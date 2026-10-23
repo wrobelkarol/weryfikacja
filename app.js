@@ -48,6 +48,7 @@ let POLA = [], TYPY = {}, RODZAJE = {};
 const st = {
   sciezka: null, opis: null, wycinki: [], mapa: new Map(), flagi: new Map(), aiZmieniony: null,
   brudne: false, zapisTimer: null, flagiTimer: null, otwarte: true, filtr: 'wszystkie', drzewo: null, edycja: null,
+  linki: [],             // linki do skanów: [{od, do, url}] (pokazLinkiSkanow)
   kolumna: 'lacina',     // kolumna, w której zostaje strzałka w dół/górę po przejściu przez pole wspólne
 };
 const RODZAJE_POL = {};
@@ -256,7 +257,7 @@ function daneDoZapisu() {
   return {
     sciezka: st.sciezka,
     dane: {
-      opis: st.opis, ai_zmieniony: st.aiZmieniony,
+      opis: st.opis, ai_zmieniony: st.aiZmieniony, linki_skanow: st.linki,
       wycinki: st.wycinki.map((w) => ({
         wycinek: w.wycinek, plik: w.plik, rodzaj: w.rodzaj, lacina: w.lacina, polski: w.polski,
         niepewne: w.niepewne, uwagi: w.uwagi, sprawdzony: w.sprawdzony, miesiac_auto: w.miesiacAuto,
@@ -540,6 +541,7 @@ async function otworzFolder(sciezka) {
   st.sciezka = d.sciezka;
   st.opis = d.opis;
   st.aiZmieniony = d.ai_zmieniony;
+  st.linki = ((d.zweryfikowany && d.zweryfikowany.linki_skanow) || []).filter((l) => l && l.url);
   try { localStorage.setItem('ostatni', d.sciezka); } catch (e) { /* bez znaczenia */ }
 
   const ai = new Map(((d.ai && d.ai.wycinki) || []).map((w) => [String(w.wycinek), w]));
@@ -680,6 +682,8 @@ function karta(w) {
     el('h2', {},
       el('span', { text: `Wycinek ${w.wycinek}` }),
       el('span', { class: 'opis', text: opisKarty(w) }),
+      el('a', { class: 'link-skanu' + (linkSkanu(w.wycinek) ? '' : ' ukryta'), href: linkSkanu(w.wycinek) || '#',
+        target: '_blank', rel: 'noopener', text: 'skan ↗', title: 'Zdjęcie strony księgi (Linki do skanów)' }),
       el('span', { class: 'znaczek ukryta' }),
       el('span', { class: 'znaczek ok poprawki ukryta', title: 'Pola poprawione względem odczytu AI – przy każdym z nich jest ✓' }),
       el('span', { class: 'prawo' }, rodzaj, sprawdzone[0])),
@@ -1046,6 +1050,63 @@ async function pobierz() {
 
 /* Po pobraniu xlsx: propozycje do słowniczka (prompt dla AI) z aktów oznaczonych jako sprawdzone.
    Zaznaczone serwer dopisuje do slowniczek.md, odznaczone zapamiętuje i już ich nie proponuje. */
+/* Linki do skanów: zakresy wycinków (od–do) z linkiem do zdjęcia strony księgi, np. w Skanotece.
+   Zapisują się w odczyt_zweryfikowany.json rocznika, a w pobieranym xlsx trafiają do kolumny "Skan". */
+function linkSkanu(wycinek) {
+  const n = parseInt(wycinek, 10);
+  const l = (st.linki || []).find((x) => n >= x.od && n <= x.do);
+  return l ? l.url : null;
+}
+
+function odswiezLinkiSkanow() {
+  for (const k of $$('.karta')) {
+    const a = $('.link-skanu', k), url = linkSkanu(k.dataset.wycinek);
+    a.classList.toggle('ukryta', !url);
+    a.href = url || '#';
+  }
+}
+
+function pokazLinkiSkanow() {
+  const tbody = el('tbody');
+  const dodajWiersz = (l = {}) => {
+    const od = el('input', { type: 'number', min: 1, value: l.od ?? '' });
+    const doo = el('input', { type: 'number', min: 1, value: l.do ?? '' });
+    const url = el('input', { type: 'url', placeholder: 'https://skanoteka.genealodzy.pl/…', value: l.url || '' });
+    const tr = el('tr', {}, el('td', {}, od), el('td', {}, doo), el('td', {}, url),
+      el('td', {}, el('button', { text: '×', title: 'Usuń wiersz', onclick: () => tr.remove() })));
+    tr.pola = { od, doo, url };
+    tbody.append(tr);
+  };
+  const ostatni = st.wycinki.length ? parseInt(st.wycinki[st.wycinki.length - 1].wycinek, 10) : '';
+  (st.linki.length ? st.linki : [{ od: 1, do: ostatni }]).forEach(dodajWiersz);
+  okno('Linki do skanów', [
+    el('p', { text: 'Wpisz zakres wycinków i link do zdjęcia strony księgi, z której pochodzą (np. wycinki 1–12 → strona 2 '
+      + 'w Skanotece). Link pokaże się przy wycinku i trafi do kolumny „Skan” w pobieranym xlsx.' }),
+    el('table', { class: 'linki-skanow' },
+      el('thead', {}, el('tr', {}, el('th', { text: 'Od wycinka' }), el('th', { text: 'Do wycinka' }),
+        el('th', { text: 'Link do skanu' }), el('th'))),
+      tbody),
+    el('div', {}, el('button', { text: '+ Dodaj wiersz', onclick: () => dodajWiersz({}) })),
+  ], [
+    el('button', { class: 'glowny', text: 'Zapisz', onclick: () => {
+      const linki = [];
+      for (const tr of $$('tr', tbody)) {
+        const od = parseInt(tr.pola.od.value, 10), doo = parseInt(tr.pola.doo.value, 10), url = tr.pola.url.value.trim();
+        if (!url && !tr.pola.od.value && !tr.pola.doo.value) continue;
+        if (!(od >= 1) || !(doo >= od)) return toast(`Zły zakres wycinków: ${tr.pola.od.value || '?'}–${tr.pola.doo.value || '?'}`);
+        if (!/^https?:\/\//i.test(url)) return toast(`Wiersz ${od}–${doo}: link musi zaczynać się od http:// albo https://`);
+        linki.push({ od, do: doo, url });
+      }
+      st.linki = linki.sort((a, b) => a.od - b.od);
+      zaplanujZapis();
+      odswiezLinkiSkanow();
+      zamknijOkno();
+      const bez = st.wycinki.filter((w) => !linkSkanu(w.wycinek)).length;
+      toast(`Zapisano linki do skanów (${linki.length}).` + (bez ? ` Bez linku: ${bez} wycinków.` : ''));
+    } }),
+  ]);
+}
+
 async function pokazPropozycjeSlowniczka() {
   let d;
   try {
@@ -1220,6 +1281,7 @@ async function start() {
   $('#b-odswiez').addEventListener('click', odswiez);
   $('#b-wyslij').addEventListener('click', wyslijNaStrone);
   $('#filtr').addEventListener('change', (e) => { st.filtr = e.target.value; zastosujFiltr(); });
+  $('#b-linki').addEventListener('click', pokazLinkiSkanow);
   $('#b-zwin').addEventListener('click', () => {
     st.otwarte = !st.otwarte;
     try { localStorage.setItem('zwiniete', st.otwarte ? '0' : '1'); } catch (e) { /* bez znaczenia */ }

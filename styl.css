@@ -139,6 +139,12 @@ body.www .tylko-lokalnie { display: none !important; }
 #okno-cialo p { margin: 0; color: var(--szary); }
 #okno-cialo ol { margin: 0; padding-left: 22px; }
 #okno-cialo a { color: var(--akcent); font-weight: 600; }
+.linki-skanow { width: 100%; border-collapse: collapse; }
+.linki-skanow th { text-align: left; font-size: 13px; color: var(--szary); font-weight: 600; padding: 2px 4px; }
+.linki-skanow td { padding: 3px 4px; }
+#okno-cialo .linki-skanow td:nth-child(-n+2) input { width: 90px; }
+.linki-skanow td:last-child { width: 1%; }
+.karta h2 .link-skanu { font-size: 13px; font-weight: 600; color: var(--akcent); text-decoration: none; }
 .propozycje { display: flex; flex-direction: column; gap: 6px; }
 .propozycja { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; line-height: 1.4; }
 #okno-cialo .propozycja input { width: auto; flex: none; margin: 3px 0 0; }
