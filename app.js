@@ -847,7 +847,7 @@ function zapamietajEdycje(e) {
   const t = e.target;
   const karta = t.closest && t.closest('.karta');
   if (!karta || !t.dataset.pole || !['lacina', 'polski'].includes(t.dataset.jezyk) ||
-      RODZAJE_POL[t.dataset.pole] !== 'tekst') {
+      (RODZAJE_POL[t.dataset.pole] !== 'tekst' && t.dataset.pole !== 'dodatkowe')) {
     st.edycja = null;
     return;
   }
@@ -856,8 +856,42 @@ function zapamietajEdycje(e) {
   st.edycja = {
     el: t,
     stare: { lacina: t.dataset.jezyk === 'lacina' ? w.lacina[k] : null, polski: w.polski[k] },
+    pola: { lacina: w.lacina[k], polski: w.polski[k] },
     tekst: { lacina: w.lacina.tekst, polski: w.polski.tekst },
   };
+}
+
+/* Słowa zmienione między starą a nową wartością pola: wspólny początek i koniec zostają, zmieniona
+   środkowa część -> [[stare, nowe]]. Samo dopisanie albo usunięcie słów nie ma czego zamieniać. */
+function zmienioneSlowa(stare, nowe) {
+  const slowa = (s) => (s || '').match(/[\p{L}\p{N}'’-]+/gu) || [];
+  const s = slowa(stare), n = slowa(nowe);
+  let p = 0;
+  while (p < s.length && p < n.length && s[p] === n[p]) p++;
+  let k = 0;
+  while (k < s.length - p && k < n.length - p && s[s.length - 1 - k] === n[n.length - 1 - k]) k++;
+  const ss = s.slice(p, s.length - k), nn = n.slice(p, n.length - k);
+  return ss.length && nn.length ? [[ss.join(' '), nn.join(' ')]] : [];
+}
+
+/* "Inne informacje z aktu": poprawione słowa (np. nazwisko, miejscowość, przezwisko) zmieniają się też
+   w tekście aktu i po drugiej stronie (łacina/polski) - tam, gdzie stoi to samo słowo, także odmienione. */
+function poprawZInnychInformacji(w, karta, edycja, jezyk, nowe) {
+  const drugi = jezyk === 'lacina' ? 'polski' : 'lacina';
+  const zmiany = zmienioneSlowa(edycja.pola[jezyk], nowe);
+  for (const [j, pole, baza] of [[jezyk, 'tekst', edycja.tekst[jezyk]], [drugi, 'dodatkowe', edycja.pola[drugi]],
+    [drugi, 'tekst', edycja.tekst[drugi]]]) {
+    if (!baza) continue;
+    const wynik = zmiany.reduce((t, [a, b]) => zamienSlowo(t, a, b), baza);   // zawsze od stanu z chwili wejścia w pole
+    if (wynik === w[j][pole]) continue;
+    w[j][pole] = wynik;
+    if (wynik !== baza) w.edytowane.add(`${j}.${pole}`);
+    const e = karta.querySelector(`[data-pole="${pole}"][data-jezyk="${j}"]`);
+    if (e) {
+      e.value = wynik;
+      if (e.tagName === 'TEXTAREA') dopasujWysokosc(e);
+    }
+  }
 }
 
 const wRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -873,8 +907,9 @@ function zamienOdmiane(tekstZ, stare, nowe) {
   if (rs.length < 3 || rs === rn) {           // krótkie słowo albo poprawiona sama końcówka: tylko ten sam zapis
     return tekstZ.replace(new RegExp(`(?<![\\p{L}\\p{N}])${wRegex(stare)}(?![\\p{L}\\p{N}])`, 'gu'), () => nowe);
   }
+  // to samo słowo co w polu -> nowe słowo w całości; forma odmieniona -> nowy rdzeń + jej końcówka
   let wynik = tekstZ.replace(new RegExp(`(?<![\\p{L}\\p{N}])${wRegex(rs)}(\\p{Ll}{0,4})(?![\\p{L}\\p{N}])`, 'gu'),
-    (_, koncowka) => rn + koncowka);
+    (slowo, koncowka) => (slowo === stare ? nowe : rn + koncowka));
   // ruchome "e": Marek -> Marku, Paweł -> Pawła, Gnojek -> Gnojka
   const bezE = (s) => (/e[kcł]$/.test(s) && s.length > 3 ? s.slice(0, -2) + s.slice(-1) : null);
   if (bezE(stare)) {
@@ -940,7 +975,10 @@ function obsluzZmiane(e) {
       if (polskie) polskie.value = t.value;
       jezyki.push('polski');
     }
-    if (st.edycja && st.edycja.el === t) poprawTekstAktu(w, karta, st.edycja, t.value, jezyki);
+    if (st.edycja && st.edycja.el === t) {
+      if (klucz === 'dodatkowe') poprawZInnychInformacji(w, karta, st.edycja, jezyk, t.value);
+      else poprawTekstAktu(w, karta, st.edycja, t.value, jezyki);
+    }
   }
   if (klucz === 'miesiac') w.miesiacAuto = false;
   if (t.tagName === 'TEXTAREA') dopasujWysokosc(t);
