@@ -855,9 +855,11 @@ function zapamietajEdycje(e) {
   const k = t.dataset.pole;
   st.edycja = {
     el: t,
+    klucz: k,
     stare: { lacina: t.dataset.jezyk === 'lacina' ? w.lacina[k] : null, polski: w.polski[k] },
     pola: { lacina: w.lacina[k], polski: w.polski[k] },
     tekst: { lacina: w.lacina.tekst, polski: w.polski.tekst },
+    dodatkowe: { lacina: w.lacina.dodatkowe, polski: w.polski.dodatkowe },
   };
 }
 
@@ -883,14 +885,18 @@ function poprawZInnychInformacji(w, karta, edycja, jezyk, nowe) {
     [drugi, 'tekst', edycja.tekst[drugi]]]) {
     if (!baza) continue;
     const wynik = zmiany.reduce((t, [a, b]) => zamienSlowo(t, a, b), baza);   // zawsze od stanu z chwili wejścia w pole
-    if (wynik === w[j][pole]) continue;
-    w[j][pole] = wynik;
-    if (wynik !== baza) w.edytowane.add(`${j}.${pole}`);
-    const e = karta.querySelector(`[data-pole="${pole}"][data-jezyk="${j}"]`);
-    if (e) {
-      e.value = wynik;
-      if (e.tagName === 'TEXTAREA') dopasujWysokosc(e);
-    }
+    ustawPoprawione(w, karta, j, pole, baza, wynik);
+  }
+}
+
+function ustawPoprawione(w, karta, j, pole, baza, wynik) {
+  if (wynik === w[j][pole]) return;
+  w[j][pole] = wynik;
+  if (wynik !== baza) w.edytowane.add(`${j}.${pole}`);
+  const e = karta.querySelector(`[data-pole="${pole}"][data-jezyk="${j}"]`);
+  if (e) {
+    e.value = wynik;
+    if (e.tagName === 'TEXTAREA') dopasujWysokosc(e);
   }
 }
 
@@ -930,18 +936,17 @@ function zamienSlowo(tekstZ, stare, nowe) {
   return s.reduce((t, slowo, i) => (slowo === n[i] ? t : zamienOdmiane(t, slowo, n[i])), tekstZ);
 }
 
+/* Poprawka pola zmienia to samo słowo w „Tekście aktu (całym)”, a poprawka nazwiska (zmarłego, rodziców,
+   małżonka) także w „Innych informacjach z aktu”. Liczone od stanu z chwili wejścia w pole, więc powrót
+   do starej wartości przywraca też tekst. */
 function poprawTekstAktu(w, karta, edycja, nowe, jezyki) {
+  const pola = NAZWISKA.includes(edycja.klucz) ? ['tekst', 'dodatkowe'] : ['tekst'];
   for (const j of jezyki) {
     const stare = edycja.stare[j];
-    if (!stare || stare === nowe) continue;
-    const poprawiony = zamienSlowo(edycja.tekst[j], stare, nowe);
-    if (poprawiony === edycja.tekst[j] || poprawiony === w[j].tekst) continue;
-    w[j].tekst = poprawiony;
-    w.edytowane.add(`${j}.tekst`);
-    const pole = karta.querySelector(`[data-pole="tekst"][data-jezyk="${j}"]`);
-    if (pole) {
-      pole.value = poprawiony;
-      dopasujWysokosc(pole);
+    if (!stare) continue;
+    for (const pole of pola) {
+      const baza = edycja[pole][j];
+      if (baza) ustawPoprawione(w, karta, j, pole, baza, zamienSlowo(baza, stare, nowe));
     }
   }
 }
