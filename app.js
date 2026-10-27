@@ -1174,7 +1174,7 @@ function pokazLinkiSkanow() {
       const bez = st.wycinki.filter((w) => !linkSkanu(w.wycinek)).length;
       toast(`Zapisano linki do skanów (${linki.length}).` + (bez ? ` Bez linku: ${bez} wycinków.` : ''));
     } }),
-  ]);
+  ], { trwale: true });
 }
 
 async function pokazPropozycjeSlowniczka() {
@@ -1213,7 +1213,9 @@ async function pokazPropozycjeSlowniczka() {
 
 // ---------------------------------------------------------------- okna: prompt, wgraj
 
-function okno(tytul, cialo, przyciski) {
+// trwale: okno nie znika po kliknieciu obok ani Esc - tylko przyciskiem (zeby nie stracic wpisanych linkow)
+function okno(tytul, cialo, przyciski, { trwale = false } = {}) {
+  $('#okno').dataset.trwale = trwale ? '1' : '';
   $('#okno-tytul').textContent = tytul;
   $('#okno-cialo').replaceChildren(...cialo);
   const zamknij = el('button', { text: 'Zamknij', onclick: zamknijOkno });
@@ -1358,8 +1360,8 @@ async function start() {
     $('#b-zwin').textContent = st.otwarte ? 'Zwiń wszystkie pola' : 'Rozwiń wszystkie pola';
     $$('.karta details').forEach((det) => { det.open = st.otwarte; });
   });
-  $('#okno').addEventListener('click', (e) => { if (e.target.id === 'okno') zamknijOkno(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') zamknijOkno(); });
+  $('#okno').addEventListener('click', (e) => { if (e.target.id === 'okno' && !$('#okno').dataset.trwale) zamknijOkno(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#okno').dataset.trwale) zamknijOkno(); });
   window.addEventListener('beforeunload', (e) => { if (st.brudne) { zapiszTeraz(); e.preventDefault(); e.returnValue = ''; } });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') zapiszTeraz(); });
 
