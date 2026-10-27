@@ -181,6 +181,9 @@ function normalizujWspolne(klucz, v) {
 }
 
 const NAZWISKA = ['zm_nazwisko', 'zm_rodowe', 'oj_nazwisko', 'ma_rodowe', 'mz_nazwisko', 'mz_rodowe'];
+// pola z kilkoma osobami (imiona po łacinie i po polsku są inne, nazwiska te same): poprawione słowa
+// przechodzą na drugą stronę i do tekstu aktu tak jak w „Innych informacjach z aktu”
+const POLA_OSOB = ['chrzestni', 'oj_rodzice', 'ma_rodzice', 'akuszerka'];
 
 const NAZWY_MIESIECY = ['styczeń', 'luty', 'marzec', 'kwiecień', 'maj', 'czerwiec', 'lipiec', 'sierpień', 'wrzesień',
   'październik', 'listopad', 'grudzień'];
@@ -900,13 +903,18 @@ function zmienioneSlowa(stare, nowe) {
   return ss.length && nn.length ? [[ss.join(' '), nn.join(' ')]] : [];
 }
 
-/* "Inne informacje z aktu": poprawione słowa (np. nazwisko, miejscowość, przezwisko) zmieniają się też
-   w tekście aktu i po drugiej stronie (łacina/polski) - tam, gdzie stoi to samo słowo, także odmienione. */
+/* "Inne informacje z aktu" (i pola osób, np. chrzestni): poprawione słowa (np. nazwisko, miejscowość, przezwisko)
+   zmieniają się też w tekście aktu i po drugiej stronie (łacina/polski) - tam, gdzie stoi to samo słowo,
+   także odmienione. */
 function poprawZInnychInformacji(w, karta, edycja, jezyk, nowe) {
   const drugi = jezyk === 'lacina' ? 'polski' : 'lacina';
   const zmiany = zmienioneSlowa(edycja.pola[jezyk], nowe);
-  for (const [j, pole, baza] of [[jezyk, 'tekst', edycja.tekst[jezyk]], [drugi, 'dodatkowe', edycja.pola[drugi]],
-    [drugi, 'tekst', edycja.tekst[drugi]]]) {
+  const cele = [[jezyk, 'tekst', edycja.tekst[jezyk]], [drugi, edycja.klucz, edycja.pola[drugi]],
+    [drugi, 'tekst', edycja.tekst[drugi]]];
+  if (edycja.klucz !== 'dodatkowe') {
+    cele.push([jezyk, 'dodatkowe', edycja.dodatkowe[jezyk]], [drugi, 'dodatkowe', edycja.dodatkowe[drugi]]);
+  }
+  for (const [j, pole, baza] of cele) {
     if (!baza) continue;
     const wynik = zmiany.reduce((t, [a, b]) => zamienSlowo(t, a, b), baza);   // zawsze od stanu z chwili wejścia w pole
     ustawPoprawione(w, karta, j, pole, baza, wynik);
@@ -1005,7 +1013,7 @@ function obsluzZmiane(e) {
       jezyki.push('polski');
     }
     if (st.edycja && st.edycja.el === t) {
-      if (klucz === 'dodatkowe') poprawZInnychInformacji(w, karta, st.edycja, jezyk, t.value);
+      if (klucz === 'dodatkowe' || POLA_OSOB.includes(klucz)) poprawZInnychInformacji(w, karta, st.edycja, jezyk, t.value);
       else poprawTekstAktu(w, karta, st.edycja, t.value, jezyki);
     }
   }
