@@ -144,7 +144,7 @@ window.WWW = (() => {
 
   async function get(url) {
     const [adres, zapytanie] = url.split('?');
-    if (adres === '/api/start') return { korzen: '', pola: spis.pola, typy: spis.typy, rodzaje: spis.rodzaje };
+    if (adres === '/api/start') return { korzen: '', pola: spis.pola, pola_urodzenia: spis.pola_urodzenia, typy: spis.typy, rodzaje: spis.rodzaje };
     if (adres === '/api/drzewo') {
       if (Date.now() - spisPobrany > 5000) {
         spis = (await json('0')) || spis;

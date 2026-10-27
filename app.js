@@ -45,6 +45,21 @@ const API = {
 };
 
 let POLA = [], TYPY = {}, RODZAJE = {};
+let POLA_KSIAG = { zgony: [], urodzenia: [] };
+/* Księga urodzeń ma te same klucze dat i dziecka co zgony (dzien_zgonu = urodzenie, dzien_pogrzebu = chrzest,
+   zm_* = dziecko), więc reguły dat działają tak samo - zmieniają się tylko słowa w komunikatach. */
+let URODZENIA = false;
+const SLOWA_ZGONY = { zdarzenia: 'zgonu', przed: 'zgonem', po: 'zgonie', drugie: 'pogrzeb', drugiego: 'pogrzebu' };
+const SLOWA_URODZENIA = { zdarzenia: 'urodzenia', przed: 'urodzeniem', po: 'urodzeniu', drugie: 'chrzest', drugiego: 'chrztu' };
+let S = SLOWA_ZGONY;
+
+function ustawKsiege(ksiega) {
+  URODZENIA = /^urodz/i.test(ksiega || '');
+  S = URODZENIA ? SLOWA_URODZENIA : SLOWA_ZGONY;
+  POLA = URODZENIA && POLA_KSIAG.urodzenia.length ? POLA_KSIAG.urodzenia : POLA_KSIAG.zgony;
+  for (const k of Object.keys(RODZAJE_POL)) delete RODZAJE_POL[k];
+  for (const [k, , r] of POLA) RODZAJE_POL[k] = r;
+}
 const st = {
   sciezka: null, opis: null, wycinki: [], mapa: new Map(), flagi: new Map(), aiZmieniony: null,
   brudne: false, zapisTimer: null, flagiTimer: null, otwarte: true, filtr: 'wszystkie', drzewo: null, edycja: null,
@@ -116,8 +131,9 @@ function plecImienia(imie) {
   if (s.length < 3 || /[\[\]]/.test(s)) return null;
   if (IMIONA_MESKIE_NA_A.includes(s)) return 'M';
   if (IMIONA_ZENSKIE_BEZ_A.includes(s)) return 'K';
-  if (/^puer/.test(s)) return 'M';
-  if (/^puell/.test(s)) return 'K';
+  if (/^puell|^duae$|^bliźniaczk/.test(s)) return 'K';
+  if (/^puer|^bliźniacy$/.test(s)) return 'M';
+  if (/^(duo|gemell|bliźnięt)/.test(s)) return null;        // bliźnięta: chłopiec i dziewczynka albo nie wiadomo
   return s.endsWith('a') || s.endsWith('ae') ? 'K' : 'M';
 }
 
@@ -143,6 +159,10 @@ function normalizujWspolne(klucz, v) {
   if (klucz === 'katolik') {
     if (['tak', 'true', '1', 'catholica', 'katolik', 'katolicka', 'katolickie'].includes(s)) return 'tak';
     if (['nie', 'false', '0', 'alia', 'aut alia', 'inne', 'inna'].includes(s)) return 'nie';
+  }
+  if (klucz === 'slubne') {
+    if (/^(tak|true|1|legitim|ślubn|slubn|prawe)/.test(s)) return 'tak';
+    if (/^(nie|false|0|illegitim|nieślubn|nieslubn|nieprawe)/.test(s)) return 'nie';
   }
   if (klucz === 'plec') {
     if (/^(m|masc|męż|mez|mezczyzna|mężczyzna)/.test(s)) return 'M';
@@ -175,7 +195,7 @@ function miesiacPogrzebu(w) {
   const [dz, mz] = dzienMiesiac(L.dzien_zgonu);
   const m = mz || miesiacZ(L.miesiac);
   if (!m) return null;
-  return dz !== null && dp !== null && dp < dz ? { n: (m % 12) + 1, opis: 'następny po zgonie' } : { n: m, opis: 'jak zgonu' };
+  return dz !== null && dp !== null && dp < dz ? { n: (m % 12) + 1, opis: `następny po ${S.po}` } : { n: m, opis: `jak ${S.zdarzenia}` };
 }
 
 /* Miesiąc dla aktów, przy których nie jest napisany: z daty "28/2" albo z najbliższego wcześniejszego
@@ -193,11 +213,12 @@ function formaZenska(n) {          // córka: Rudecki -> Rudecka, Ciepły -> Cie
 function uzupelnijNazwiskaDzieci() {
   for (const w of st.wycinki) {
     w.nazwiskoAuto = false;
-    if (w.rodzaj !== 'akt' || !TYPY_DZIECI.includes(w.lacina.typ)) continue;
+    if (w.rodzaj !== 'akt' || !(URODZENIA || TYPY_DZIECI.includes(w.lacina.typ))) continue;
     if (w.edytowane.has('lacina.zm_nazwisko') || w.edytowane.has('polski.zm_nazwisko')) continue;
     const z = (d) => {
       const bezOjca = !d.oj_imie && !d.oj_nazwisko;      // ojca nie ma w akcie (np. martwo urodzone dziecko nieślubne)
-      const n = w.lacina.typ === 'dziecko_nieslubne' || bezOjca ? (d.ma_rodowe || d.oj_nazwisko) : d.oj_nazwisko;
+      const nieslubne = URODZENIA ? w.lacina.slubne === 'nie' : w.lacina.typ === 'dziecko_nieslubne';
+      const n = nieslubne || bezOjca ? (d.ma_rodowe || d.oj_nazwisko) : d.oj_nazwisko;
       return n && w.lacina.plec === 'K' && n === d.oj_nazwisko ? formaZenska(n) : (n || '');
     };
     const lat = z(w.lacina), pol = z(w.polski) || lat;
@@ -293,7 +314,7 @@ function polacz(z, a, plik, wycinek) {
     for (const [k] of POLA) {
       if (twoje(`${jezyk}.${k}`, w[jezyk][k]) || w[jezyk][k] === ai[jezyk][k]) continue;
       // nazwisko dziecka liczy program (uzupelnijNazwiskaDzieci) - to nie jest nowy odczyt AI
-      if (k === 'zm_nazwisko' && TYPY_DZIECI.includes(w.lacina.typ)) continue;
+      if (k === 'zm_nazwisko' && (URODZENIA || TYPY_DZIECI.includes(w.lacina.typ))) continue;
       w[jezyk][k] = ai[jezyk][k];
       zmiany++;
     }
@@ -363,17 +384,17 @@ function obliczFlagi() {
     if (!L.miesiac) dodaj('miesiac', 'brak miesiąca – nie ma go na wycinku ani we wcześniejszych aktach');
     if (m && poprzMiesiac && m < poprzMiesiac) dodaj('miesiac', `miesiąc ${m} po miesiącu ${poprzMiesiac} z wcześniejszego aktu`);
     const [dz, mz] = dzienMiesiac(L.dzien_zgonu);
-    if (mz && m && mz !== m && !w.miesiacAuto) dodaj('miesiac', `data zgonu zapisana jako ${L.dzien_zgonu}, a miesiąc ${m}`);
+    if (mz && m && mz !== m && !w.miesiacAuto) dodaj('miesiac', `data ${S.zdarzenia} zapisana jako ${L.dzien_zgonu}, a miesiąc ${m}`);
     const [dp, mpZapis] = dzienMiesiac(L.dzien_pogrzebu);
     const mpPole = miesiacZ(L.miesiac_pogrzebu);
-    const mp = mpPole || mpZapis;          // miesiąc pogrzebu: z pola albo z zapisu dnia „3/2”
-    if (L.dzien_zgonu && dz === null) dodaj('dzien_zgonu', 'dzień zgonu to nie liczba');
-    if (L.dzien_pogrzebu && dp === null) dodaj('dzien_pogrzebu', 'dzień pogrzebu to nie liczba');
+    const mp = mpPole || mpZapis;          // miesiąc pogrzebu (chrztu): z pola albo z zapisu dnia „3/2”
+    if (L.dzien_zgonu && dz === null) dodaj('dzien_zgonu', `dzień ${S.zdarzenia} to nie liczba`);
+    if (L.dzien_pogrzebu && dp === null) dodaj('dzien_pogrzebu', `dzień ${S.drugiego} to nie liczba`);
     const mies = mz || miesiac;
     let zgon = null;
     if (dz !== null && rok && mies) {
       zgon = data(rok, mies, dz);
-      if (!zgon) dodaj('dzien_zgonu', 'niemożliwa data zgonu');
+      if (!zgon) dodaj('dzien_zgonu', `niemożliwa data ${S.zdarzenia}`);
     }
     if (zgon && dp !== null) {
       let pm, pr;
@@ -381,16 +402,16 @@ function obliczFlagi() {
       else if (dp >= dz) { pm = mies; pr = rok; }
       else { pm = (mies % 12) + 1; pr = rok + (mies === 12 ? 1 : 0); }
       const pogrzeb = data(pr, pm, dp);
-      if (!pogrzeb) dodaj('dzien_pogrzebu', 'niemożliwa data pogrzebu');
+      if (!pogrzeb) dodaj('dzien_pogrzebu', `niemożliwa data ${S.drugiego}`);
       else {
         const dni = Math.round((pogrzeb - zgon) / 864e5);
-        if (dni > 5 || dni < 0) {
-          dodaj('dzien_pogrzebu', dni < 0 ? 'pogrzeb przed zgonem' : `pogrzeb ${dni} dni po zgonie`);
-          if (mpPole) dodaj('miesiac_pogrzebu', `miesiąc pogrzebu ${mpPole}: pogrzeb ${dni} dni po zgonie`);
-        } else if (dni === 0) dodaj('dzien_pogrzebu', 'pogrzeb tego samego dnia co zgon');
+        if (dni > (URODZENIA ? 14 : 5) || dni < 0) {     // chrzest bywa tego samego dnia, pogrzeb nie
+          dodaj('dzien_pogrzebu', dni < 0 ? `${S.drugie} przed ${S.przed}` : `${S.drugie} ${dni} dni po ${S.po}`);
+          if (mpPole) dodaj('miesiac_pogrzebu', `miesiąc ${S.drugiego} ${mpPole}: ${S.drugie} ${dni} dni po ${S.po}`);
+        } else if (dni === 0 && !URODZENIA) dodaj('dzien_pogrzebu', 'pogrzeb tego samego dnia co zgon');
       }
     }
-    if (zgon && poprzData && zgon < poprzData) dodaj('dzien_zgonu', 'data zgonu wcześniejsza niż w poprzednim akcie');
+    if (zgon && poprzData && zgon < poprzData) dodaj('dzien_zgonu', `data ${S.zdarzenia} wcześniejsza niż w poprzednim akcie`);
     if (zgon) poprzData = zgon;
 
     const typ = L.typ, plec = L.plec;
@@ -543,6 +564,7 @@ async function otworzFolder(sciezka) {
   const tenSam = st.sciezka === d.sciezka;      // "Odśwież" tego samego rocznika: strona zostaje w miejscu
   st.sciezka = d.sciezka;
   st.opis = d.opis;
+  ustawKsiege(d.opis && d.opis.ksiega);
   st.aiZmieniony = d.ai_zmieniony;
   st.linki = ((d.zweryfikowany && d.zweryfikowany.linki_skanow) || []).filter((l) => l && l.url);
   try { localStorage.setItem('ostatni', d.sciezka); } catch (e) { /* bez znaczenia */ }
@@ -810,8 +832,10 @@ function zaznaczFlagiKarty(karta, w) {
       // puste pole = miesiąc liczony automatycznie; napis pokazuje, jaki wyjdzie (wpisz tylko, gdy inny)
       const ef = miesiacPogrzebu(w);
       e.options[0].textContent = ef && ef.opis !== 'wpisany'
-        ? `— ${ef.opis}: ${NAZWY_MIESIECY[ef.n - 1]}` : '— tak jak zgonu';
-      tytuly.push('Zostaw puste, gdy pogrzeb był w tym samym miesiącu co zgon. Wybierz miesiąc, gdy był w innym (np. zgon 31 stycznia, pogrzeb 3 lutego).');
+        ? `— ${ef.opis}: ${NAZWY_MIESIECY[ef.n - 1]}` : `— tak jak ${S.zdarzenia}`;
+      tytuly.push(URODZENIA
+        ? 'Zostaw puste, gdy chrzest był w tym samym miesiącu co urodzenie. Wybierz miesiąc, gdy był w innym (np. urodzenie 31 stycznia, chrzest 2 lutego).'
+        : 'Zostaw puste, gdy pogrzeb był w tym samym miesiącu co zgon. Wybierz miesiąc, gdy był w innym (np. zgon 31 stycznia, pogrzeb 3 lutego).');
     }
     e.title = tytuly.join('\n');
     const ptaszek = e.nextElementSibling;
@@ -1309,10 +1333,10 @@ function toast(tekstT) {
 
 async function start() {
   const d = await API.get('/api/start');
-  POLA = d.pola;
+  POLA_KSIAG = { zgony: d.pola, urodzenia: d.pola_urodzenia || [] };
   TYPY = d.typy;
   RODZAJE = d.rodzaje;
-  for (const [k, , r] of POLA) RODZAJE_POL[k] = r;
+  ustawKsiege(null);
   try { st.otwarte = localStorage.getItem('zwiniete') !== '1'; } catch (e) { /* bez znaczenia */ }
   $('#b-zwin').textContent = st.otwarte ? 'Zwiń wszystkie pola' : 'Rozwiń wszystkie pola';
 
