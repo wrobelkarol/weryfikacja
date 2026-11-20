@@ -83,7 +83,20 @@ window.WWW = (() => {
     if (!token) return undefined;
     const r = await fetch(`${GH}${sciezka}?ref=${ref}`, { cache: 'no-store', headers: naglowki() });
     if (r.status === 404) return null;
+    if (r.status === 401) tokenOdrzucony();
     return r.ok ? r.arrayBuffer() : undefined;
+  }
+
+  /* Token wygasł albo jest zły: strona dalej czyta dane (bez tokenu, z Pages i raw.githubusercontent),
+     poprawki czekają w przeglądarce, a przycisk prosi o nowy token. */
+  let tokenZly = false;
+  function tokenOdrzucony() {
+    if (!token) return;
+    token = null;
+    tokenZly = true;
+    sha.clear();
+    pokazPrzyciskTokenu();
+    stan('Token GitHuba wygasł – kliknij „Wklej token” i wklej nowy. Do tego czasu poprawki zostają w tej przeglądarce.', true);
   }
 
   async function zPages(sciezka, swiezy) {
@@ -117,6 +130,10 @@ window.WWW = (() => {
     if (r.status === 404) {
       sha.set(nazwa, null);
       return null;
+    }
+    if (r.status === 401) {
+      tokenOdrzucony();
+      return poprawki(nazwa);           // jeszcze raz, bez tokenu
     }
     if (!r.ok) throw new Error(`GitHub: błąd ${r.status}`);
     const d = await r.json();
@@ -383,7 +400,11 @@ window.WWW = (() => {
         sha.set(z.plik, (await r.json()).content.sha);
         return;
       }
-      if (r.status === 401 || r.status === 403) throw new Error('GitHub nie przyjął tokenu – mógł wygasnąć');
+      if (r.status === 401) {
+        tokenOdrzucony();
+        throw new Error('token GitHuba wygasł – kliknij „Wklej token”');
+      }
+      if (r.status === 403) throw new Error('GitHub nie pozwolił zapisać – token nie ma uprawnienia „Contents: Read and write”');
       if (r.status !== 409 && r.status !== 422) throw new Error(`GitHub: błąd ${r.status}`);
     }
     throw new Error('konflikt zapisu na GitHubie');
@@ -516,7 +537,7 @@ window.WWW = (() => {
     const b = document.getElementById('b-token');
     if (!b) return;
     b.classList.remove('ukryta');
-    b.textContent = token ? 'Token ✓' : 'Wklej token';
+    b.textContent = token ? 'Token ✓' : tokenZly ? 'Wklej token (stary wygasł)' : 'Wklej token';
     b.title = token ? 'Strona zapisuje poprawki na GitHubie. Kliknij, żeby wkleić inny token.'
       : 'Strona nie ma tokenu – poprawki zostają w tej przeglądarce. Wklej token GitHuba, żeby szły na GitHuba.';
     b.classList.toggle('glowny', !token);
