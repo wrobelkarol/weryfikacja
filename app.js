@@ -53,8 +53,22 @@ const SLOWA_ZGONY = { zdarzenia: 'zgonu', przed: 'zgonem', po: 'zgonie', drugie:
 const SLOWA_URODZENIA = { zdarzenia: 'urodzenia', przed: 'urodzeniem', po: 'urodzeniu', drugie: 'chrzest', drugiego: 'chrztu' };
 let S = SLOWA_ZGONY;
 
+/* Format Geneteki (zgony): pod łaciną każdy akt jest od razu przeliczony na kolumny Geneteki A–S z polskiego
+   odczytu AI – tym samym kodem co w programie „genetyka weryfikacja” (konwersja.js, xlsx.js). Ręczne poprawki
+   kolumn zapisują się przy wycinku (pole „geneteka”), a „Pobierz xlsx genetyka” zapisuje plik dla Geneteki
+   w folderze rocznika. Księga urodzeń zostaje po staremu (łacina i polski obok siebie, dawny xlsx). */
+let K = null, XL = null, SZABLON = null, SLOWNIK = null;
+let GENETEKA = false;
+const NAZWY_PARAFII = { Przytkowice: 'Przytkowice-Z-przenajswietszej-trojcy' };
+const SZEROKIE_GEN = new Set(['M']);
+const SREDNIE_GEN = new Set(['L', 'H', 'I']);
+// pola łaciny widoczne zawsze; pozostałe puste są schowane (przycisk „Pokaż puste pola”)
+const ZAWSZE_WIDOCZNE = new Set(['nr', 'miesiac', 'dzien_zgonu', 'dzien_pogrzebu', 'dom', 'katolik', 'plec', 'wiek',
+  'przyczyna', 'typ', 'zm_imie', 'zm_nazwisko', 'tekst']);
+
 function ustawKsiege(ksiega) {
   URODZENIA = /^urodz/i.test(ksiega || '');
+  GENETEKA = !!K && !URODZENIA;
   S = URODZENIA ? SLOWA_URODZENIA : SLOWA_ZGONY;
   POLA = URODZENIA && POLA_KSIAG.urodzenia.length ? POLA_KSIAG.urodzenia : POLA_KSIAG.zgony;
   for (const k of Object.keys(RODZAJE_POL)) delete RODZAJE_POL[k];
@@ -65,6 +79,8 @@ const st = {
   brudne: false, zapisTimer: null, flagiTimer: null, otwarte: true, filtr: 'wszystkie', drzewo: null, edycja: null,
   linki: [],             // linki do skanów: [{od, do, url}] (pokazLinkiSkanow)
   kolumna: 'lacina',     // kolumna, w której zostaje strzałka w dół/górę po przejściu przez pole wspólne
+  gen: new Map(),        // wycinek -> {wiersz (kolumny A–S), flagi, podpowiedzi} liczone z odczytu (przeliczGeneteke)
+  pokazPuste: false,     // puste pola łaciny widoczne
 };
 const RODZAJE_POL = {};
 
@@ -123,7 +139,53 @@ function wiekWLatach(v) {
   return ile ? suma : null;
 }
 
-const IMIONA_MESKIE_NA_A = ['kuba', 'barnaba', 'bonawentura', 'kosma', 'jarema', 'zawisza', 'sasza', 'bonaventura'];
+// <wiek-polski> – ta sama zasada co w programie „genetyka weryfikacja” (konwersja.js, funkcja wiek):
+// wiek bez ułamków zwykłych, zaokrąglony do całości albo do ,5 (połówki w górę), z polską odmianą
+// („40½ lat” -> „40,5 roku”, „1 10/12 roku” -> „2 lata”, „4 lata 3 miesiące” -> „4,5 roku”).
+// Data urodzenia zamiast wieku, „—” i nietypowe zapisy zostają bez zmian.
+const WIEK_ULAMKI = { '½': 0.5, '¼': 0.25, '¾': 0.75, '⅓': 1 / 3, '⅔': 2 / 3, '⅙': 1 / 6, '⅚': 5 / 6, '⅛': 0.125 };
+const WIEK_JEDNOSTKI = [
+  { re: /^(rok|roku|lat|lata|latek|r$|ann)/i, formy: ['rok', 'lata', 'lat', 'roku'], dni: 365.25 },
+  { re: /^(miesiąc|miesiąca|miesiące|miesięcy|mies|m-c|mens|m$)/i, formy: ['miesiąc', 'miesiące', 'miesięcy', 'miesiąca'], dni: 30.4375 },
+  { re: /^(tydzień|tygodnie|tygodni|tygodnia|tydz|tyg|hebd)/i, formy: ['tydzień', 'tygodnie', 'tygodni', 'tygodnia'], dni: 7 },
+  { re: /^(dzień|dni|dnia|dzie|dier|dies|die|d$)/i, formy: ['dzień', 'dni', 'dni', 'dnia'], dni: 1 },
+  { re: /^(godzina|godziny|godzin|godz|hor)/i, formy: ['godzina', 'godziny', 'godzin', 'godziny'], dni: 1 / 24 },
+];
+const WIEK_RE = /(?:(?:(\d+)\s+)?(\d+)\s*\/\s*(\d+)|(\d+(?:\.\d+)?)?\s*([½¼¾⅓⅔⅙⅚⅛])|(\d+(?:\.\d+)?))\s*\.?\s*([a-ząćęłńóśźż-]+)?\.?/gi;
+
+function wiekPolski(zrodlo) {
+  const surowy = String(zrodlo ?? '').trim();
+  if (!surowy || /^[—–\-?.]+$/.test(surowy)) return zrodlo ?? '';
+  if (/\bn\.|\bur\.|urodz|natus|nata\b|\b1[5-9]\d\d\b/i.test(surowy)) return zrodlo;
+  const t = surowy.replace(/\(.*?\)/g, ' ').replace(/(\d),(\d)/g, '$1.$2').replace(/\s+/g, ' ').trim();
+  const czesci = [];
+  for (const m of t.matchAll(WIEK_RE)) {
+    if (!m[0].trim()) continue;
+    let x;
+    if (m[2] !== undefined) { if (!+m[3]) continue; x = (m[1] ? +m[1] : 0) + +m[2] / +m[3]; }
+    else if (m[5]) x = (m[4] ? +m[4] : 0) + WIEK_ULAMKI[m[5]];
+    else x = +m[6];
+    const j = m[7] ? WIEK_JEDNOSTKI.find((jj) => jj.re.test(m[7])) : null;
+    if (m[7] && !j) return zrodlo;                      // nieznana jednostka – zostaw, jak jest
+    czesci.push({ x, j });
+  }
+  if (!czesci.length) return zrodlo;
+  const jednostki = czesci.map((c) => c.j).filter(Boolean);
+  const glowna = jednostki.length ? WIEK_JEDNOSTKI.find((jj) => jednostki.includes(jj)) : null;
+  const x = czesci.length === 1 ? czesci[0].x : czesci.reduce((s, c) => s + c.x * (c.j || glowna).dni, 0) / glowna.dni;
+  const y = Math.floor(x * 2 + 0.5 + 1e-9) / 2;
+  const liczbaTekst = (Math.round(y * 100) / 100).toString().replace('.', ',');
+  if (!glowna) return liczbaTekst;
+  const f = glowna.formy;
+  let forma;
+  if (!Number.isInteger(y)) forma = f[3];
+  else if (y === 1) forma = f[0];
+  else { const j = y % 10, d = y % 100; forma = j >= 2 && j <= 4 && !(d >= 12 && d <= 14) ? f[1] : f[2]; }
+  return `${liczbaTekst} ${forma}`;
+}
+// </wiek-polski>
+
+const IMIONA_MESKIE_NA_A =['kuba', 'barnaba', 'bonawentura', 'kosma', 'jarema', 'zawisza', 'sasza', 'bonaventura'];
 const IMIONA_ZENSKIE_BEZ_A = ['agnes', 'elisabeth', 'elizabeth', 'beatrix', 'gertrudis', 'hedvigis', 'ruth', 'rachel', 'dorothea'];
 
 function plecImienia(imie) {
@@ -252,6 +314,10 @@ function pusteWartosci() {
   return Object.fromEntries(POLA.map(([k]) => [k, '']));
 }
 
+function bezPogrzebu(s) {
+  return String(s ?? '').replace(/(^|, )pogrzeb: \d{1,2}\.\d{1,2}\.\d{4}(, )?/, (_, a, b) => (a && b ? ', ' : ''));
+}
+
 function normalizuj(wpis, plik, wycinek) {
   wpis = wpis || {};
   const w = {
@@ -264,7 +330,14 @@ function normalizuj(wpis, plik, wycinek) {
     zmieniono: +wpis.zmieniono || 0,     // czas ostatniej poprawki: przy łączeniu z poprawkami ze strony www wygrywa nowsza
     ai: null,                            // odczyt AI do porównania (zapamietajAi)
     miesiacAuto: false,
+    // ręczne poprawki kolumn Geneteki: {wiersze: [{poprawki: {kolumna: {wartosc, auto}}}]} (drugi wiersz = bliźnięta)
+    geneteka: wpis.geneteka && Array.isArray(wpis.geneteka.wiersze) ? JSON.parse(JSON.stringify(wpis.geneteka)) : null,
   };
+  // od 13.11.2026 pogrzebu nie ma w uwagach Geneteki – znika też z uwag poprawionych wcześniej ręcznie
+  for (const r of (w.geneteka && w.geneteka.wiersze) || []) {
+    const p = r && r.poprawki && r.poprawki.M;
+    if (p) { p.wartosc = bezPogrzebu(p.wartosc); p.auto = bezPogrzebu(p.auto); }
+  }
   for (const [k, , rodzaj] of POLA) {
     let l = tekst(wpis.lacina && wpis.lacina[k]);
     let p = tekst(wpis.polski && wpis.polski[k]);
@@ -287,7 +360,10 @@ function daneDoZapisu() {
         wycinek: w.wycinek, plik: w.plik, rodzaj: w.rodzaj, lacina: w.lacina, polski: w.polski,
         niepewne: w.niepewne, uwagi: w.uwagi, sprawdzony: w.sprawdzony, miesiac_auto: w.miesiacAuto,
         edytowany: w.edytowane.size > 0, edytowane_pola: [...w.edytowane], zmieniono: w.zmieniono,
+        geneteka: w.geneteka || undefined,
       })),
+      link_jednostki: st.link || undefined,
+      linki_zmieniono: st.linkiZmieniono || undefined,    // przy łączeniu z poprawkami ze strony wygrywają nowsze linki
     },
   };
 }
@@ -296,14 +372,19 @@ function daneDoZapisu() {
    albo zmieniłeś, zostają; pozostałe zawsze biorą wartość z odczytu AI (np. gdy AI skończyło
    czytać już po tym, jak coś wpisałeś). */
 function polacz(z, a, plik, wycinek) {
+  // wiek po polsku zawsze zaokrąglony (wiekPolski) – w odczycie AI i w zapisie tak samo,
+  // więc sprawdzone akty nie tracą znacznika „sprawdzony”; łacina zostaje dosłowna
   if (!z) {
     const w = normalizuj(a, plik, wycinek);
+    w.polski.wiek = wiekPolski(w.polski.wiek);
     if (a) zapamietajAi(w, w);
     return { w, zmiany: 0, zdjete: false };
   }
   const w = normalizuj(z, plik, wycinek);
+  w.polski.wiek = wiekPolski(w.polski.wiek);
   if (!a) return { w, zmiany: 0, zdjete: false };
   const ai = normalizuj(a, plik, wycinek);
+  ai.polski.wiek = wiekPolski(ai.polski.wiek);
   zapamietajAi(w, ai);
   // zapis z pierwszej wersji programu nie pamiętał, które pola zmieniłeś - wtedy Twoje są wszystkie niepuste
   const staryZapis = !Array.isArray(z.edytowane_pola) && !!z.edytowany;
@@ -359,7 +440,71 @@ function liczPoprawione(w) {
     if (rodzaj === 'tekst' || rodzaj === 'dlugi') n += poprawione(w, k, 'lacina') + poprawione(w, k, 'polski');
     else n += poprawione(w, k, 'oba');
   }
-  return n;
+  return n + poprawkiGeneteki(w);
+}
+
+// ---------------------------------------------------------------- format Geneteki: wartości i podświetlenia
+
+function przeliczGeneteke() {
+  st.gen = new Map();
+  if (!GENETEKA) return;
+  const wyniki = K.konwertujRocznik({ wycinki: st.wycinki, linki_skanow: st.linki },
+    { rok: st.opis && st.opis.rok, slownik: SLOWNIK, miejscowosc: (st.opis && st.opis.parafia) || 'Przytkowice',
+      link: st.link || undefined, skany: st.skany });
+  for (const r of wyniki) st.gen.set(r.wycinek, r);
+}
+
+/** Wiersze Geneteki aktu: [{nr, wartosci, auto, poprawki, flagi (kolumna -> [powody]), zmiany}] – jak w „genetyka weryfikacja”. */
+function wierszeGeneteki(w) {
+  const wynik = GENETEKA && w.rodzaj === 'akt' ? st.gen.get(w.wycinek) : null;
+  if (!wynik) return [];
+  const lista = w.geneteka && w.geneteka.wiersze.length ? w.geneteka.wiersze : [{ poprawki: {} }];
+  return lista.map((r, nr) => {
+    const poprawki = r.poprawki || {};
+    const wartosci = {}, flagi = {}, zmiany = {}, aktywne = {};
+    for (const k of K.KOLUMNY) {
+      // poprawka równa obecnej wartości automatycznej (np. link wpisany ręcznie, potem ten sam w „Link do skanów”) już nic nie zmienia
+      let p = poprawki[k] && poprawki[k].wartosc !== wynik.wiersz[k] ? poprawki[k] : null;
+      // nr skanu doszedł później (Tartak, zakresy) – dopisuje się do uwag poprawionych ręcznie, bez pytania
+      const nrSkanu = k === 'M' && p && !/nr skanu:/.test(p.wartosc)
+        && wynik.wiersz.M.startsWith(`${p.auto}, nr skanu: `) ? wynik.wiersz.M.slice(p.auto.length) : '';
+      if (nrSkanu) p = { wartosc: p.wartosc + nrSkanu, auto: wynik.wiersz.M };
+      wartosci[k] = p ? p.wartosc : wynik.wiersz[k];
+      if (p) aktywne[k] = p;
+      const powody = [];
+      if (!p) powody.push(...(wynik.flagi[k] || []));
+      if (p && p.auto !== wynik.wiersz[k]) {
+        zmiany[k] = p;
+        powody.push(`odczyt się zmienił: automatycznie było „${p.auto || '(puste)'}”, teraz „${wynik.wiersz[k] || '(puste)'}” – zostaje Twoja poprawka`);
+      }
+      if (k !== 'A' && K.WYMAGANE.includes(k) && !String(wartosci[k] || '').trim() && !powody.some((x) => /wymagane/.test(x))) {
+        powody.push('pole wymagane przez Genetekę jest puste');
+      }
+      if (k !== 'L' && p && /[\\()'"*;]|\.\.\.|…|\.,|[½¼¾]/.test(p.wartosc)) powody.push('znaki niedozwolone w Genetece (zostaną usunięte przy zapisie)');
+      if (powody.length) flagi[k] = powody;
+    }
+    if (nr > 0) wartosci.A = '';
+    return { nr, wartosci, auto: wynik.wiersz, poprawki: aktywne, flagi, zmiany };
+  });
+}
+
+/** Podświetlenia Geneteki aktu jako teksty „H nazwisko: powód”. */
+function flagiGeneteki(w) {
+  const wynik = [];
+  for (const r of wierszeGeneteki(w)) {
+    for (const [k, powody] of Object.entries(r.flagi)) for (const p of powody) wynik.push(`${k} ${K.NAGLOWKI[k]}: ${p}`);
+  }
+  return wynik;
+}
+
+function poprawkiGeneteki(w) {
+  if (!w.geneteka) return 0;
+  const wiersze = wierszeGeneteki(w);
+  return wiersze.reduce((n, r) => n + Object.keys(r.poprawki).length, 0) + Math.max(0, wiersze.length - 1);
+}
+
+function maFlagi(w) {
+  return st.flagi.has(w.wycinek) || flagiGeneteki(w).length > 0;
 }
 
 // ---------------------------------------------------------------- podejrzane miejsca (reguły)
@@ -448,7 +593,10 @@ function obliczFlagi() {
       dodaj('zm_nazwisko', `nazwisko zmarłej inne niż męża (${L.mz_nazwisko})`);
     }
     for (const k of ['zm_nazwisko', 'zm_rodowe', 'oj_nazwisko', 'ma_rodowe', 'mz_nazwisko', 'mz_rodowe']) {
-      if (L[k] && P[k] && L[k] !== P[k]) dodaj(k, 'nazwisko po polsku różni się od łacińskiego (nazwisk się nie tłumaczy)');
+      if (L[k] && P[k] && L[k] !== P[k]) {
+        dodaj(k, GENETEKA ? `w tłumaczeniu (format Geneteki) jest „${P[k]}” – nazwisk się nie tłumaczy; popraw łacinę albo kolumnę Geneteki`
+          : 'nazwisko po polsku różni się od łacińskiego (nazwisk się nie tłumaczy)');
+      }
     }
     for (const [k] of POLA) {
       if (/\[\s*łac\./i.test(P[k])) dodaj(k, 'AI zostawiło część po łacinie ([łac. …]) – do przetłumaczenia');
@@ -584,6 +732,14 @@ async function otworzFolder(sciezka) {
     return wynik.w;
   });
   st.mapa = new Map(st.wycinki.map((w) => [w.wycinek, w]));
+  st.link = (d.zweryfikowany && d.zweryfikowany.link_jednostki) || '';
+  st.linkiZmieniono = (d.zweryfikowany && d.zweryfikowany.linki_zmieniono) || 0;
+  st.skany = d.skany || null;          // wycinek -> zdjęcie strony (Tartak, pocięte/skany.json)
+  /* Rocznik pobrany już starym sposobem (dawny xlsx Łacina/Polski, sprawdzany potem w programie „Weryfikacja
+     Geneteka”) zostaje po staremu; format Geneteki od razu tutaj mają roczniki jeszcze niepobrane. */
+  const zapis = d.zweryfikowany || {};
+  st.stary = !URODZENIA && !!(d.geneteka_poprawki || (zapis.pobrano && !zapis.xlsx_geneteki));
+  if (st.stary) GENETEKA = false;
 
   const kom = [];
   const nazwa = [d.opis.parafia, d.opis.ksiega, d.opis.rok].filter(Boolean).join(' · ') || d.sciezka;
@@ -600,6 +756,10 @@ async function otworzFolder(sciezka) {
   if (bezObrazu.length) kom.push(['uwaga', `W odczycie AI są wpisy bez obrazu: ${bezObrazu.join(', ')}. Numeracja wycinków mogła się zmienić (ponowne cięcie w Tartaku?).`]);
   if (uzupelnione) kom.push(['', `Wczytano nowy odczyt AI do ${uzupelnione} wycinków. Pola, które wpisałeś albo poprawiłeś sam, zostały bez zmian.`]);
   if (zdjete) kom.push(['uwaga', `W ${zdjete} wycinkach oznaczonych jako sprawdzone AI zmieniło wartości – oznaczenie „sprawdzone” zdjęte, przejrzyj je jeszcze raz.`]);
+  if (st.stary) {
+    kom.push(['', 'Ten rocznik był już pobrany starym sposobem, więc jest pokazany po staremu (łacina i polski obok siebie, '
+      + '„Pobierz xlsx” w dawnym formacie). Format Geneteki sprawdzasz dla niego w programie „Weryfikacja Geneteka”.']);
+  }
   pokazKomunikaty(kom);
 
   $('#naglowek-folder').textContent = nazwa;
@@ -607,9 +767,18 @@ async function otworzFolder(sciezka) {
   $('#pusto').classList.add('ukryta');
   $('#narzedzia').classList.toggle('ukryta', !st.wycinki.length);
   $('#b-pobierz').disabled = !st.wycinki.length;
+  $('#b-pobierz').textContent = GENETEKA ? 'Pobierz xlsx genetyka' : 'Pobierz xlsx';
+  $('#b-pobierz').title = GENETEKA ? 'Zapisz plik xlsx dla Geneteki w folderze rocznika' : 'Pobierz plik xlsx z arkuszami Łacina i Polski';
+  $('#b-scal').disabled = !GENETEKA;
+  // na stronie www dawny xlsx (Łacina/Polski) się nie robi – robi go program na komputerze
+  $('#b-pobierz').classList.toggle('ukryta', !!WWW && !GENETEKA);
+  $('#b-linki').textContent = GENETEKA ? 'Link do skanów' : 'Linki do skanów';
+  $('#b-linki').title = GENETEKA ? 'Link do jednostki w Skanotece (kolumna „plik” Geneteki)'
+    : 'Zakresy wycinków i linki do zdjęć stron księgi (kolumna „Skan” w xlsx)';
   uzupelnijMiesiace();
   uzupelnijNazwiskaDzieci();
   obliczFlagi();
+  przeliczGeneteke();
   rysujKarty();
   $$('.wezel').forEach((w) => w.classList.toggle('aktywny', w.dataset.sciezka === d.opis.rocznik));
   if (!tenSam) {
@@ -672,38 +841,54 @@ function karta(w) {
     rysujPola(s);
     poZmianie(s, w);
   });
-  // ten sam przycisk u góry i na dole karty (żeby po sprawdzeniu pól nie przewijać do góry)
-  const sprawdzone = [0, 1].map(() => el('button', { class: 'b-sprawdzone' }));
-  const pokazSprawdzone = () => sprawdzone.forEach((b) => {
+  // ten sam przycisk u góry i na dole karty (żeby po sprawdzeniu pól nie przewijać do góry);
+  // dolny (i Enter) po oznaczeniu przechodzi do następnego wycinka
+  const sprawdzone = [0, 1].map(() => el('button', { class: 'b-sprawdzone', type: 'button' }));
+  const pokazSprawdzone = () => sprawdzone.forEach((b, i) => {
     b.classList.toggle('wcisniety', w.sprawdzony);
-    b.textContent = w.sprawdzony ? '✓ Sprawdzone' : 'Oznacz jako sprawdzone';
+    if (i === 0) b.textContent = w.sprawdzony ? '✓ Sprawdzone' : 'Oznacz jako sprawdzone';
+    else {
+      b.replaceChildren(w.sprawdzony ? 'Sprawdzony ✓ (kliknij, żeby cofnąć)' : 'Sprawdzone ✓', el('kbd', { text: 'Enter' }));
+      b.title = 'Oznacz jako sprawdzony i przejdź do następnego wycinka (Enter)';
+    }
   });
   pokazSprawdzone();
-  sprawdzone.forEach((b, i) => b.addEventListener('click', () => {
-    w.sprawdzony = !w.sprawdzony;
-    w.zmieniono = Date.now();
+  s.ustawSprawdzony = (wartosc, dalej) => {
+    if (w.sprawdzony !== wartosc) {
+      w.sprawdzony = wartosc;
+      w.zmieniono = Date.now();
+      zaplanujZapis();
+    }
     pokazSprawdzone();
     s.classList.toggle('gotowa', w.sprawdzony);
     // sprawdzony wycinek zwija pola; cofnięcie oznaczenia znów je pokazuje
     szczegoly.open = w.sprawdzony ? false : st.otwarte;
     zaznaczFlagiKarty(s, w);
     odswiezLiczniki();
-    zaplanujZapis();
     zastosujFiltr(true);
-    if (w.sprawdzony && i === 1) {
-      // z dolnego przycisku: po zwinięciu przejdź do następnego wycinka (inaczej strona "skacze")
-      let nast = s.nextElementSibling;
-      while (nast && nast.classList.contains('ukryta')) nast = nast.nextElementSibling;
-      (nast || s).scrollIntoView({ block: 'start' });
+    if (w.sprawdzony && dalej) {
+      const nast = sasiedniaKarta(s, 1);
+      if (nast) pokazKarte(nast);
+      else {
+        s.scrollIntoView({ block: 'start' });
+        const brak = st.wycinki.filter((x) => !x.sprawdzony).length;
+        toast(brak ? `To ostatni wycinek. Niesprawdzonych zostało: ${brak}.` : 'Wszystkie wycinki sprawdzone – możesz pobrać xlsx.');
+      }
     }
-  }));
+  };
+  sprawdzone[0].addEventListener('click', () => s.ustawSprawdzony(!w.sprawdzony, false));
+  sprawdzone[1].addEventListener('click', () => s.ustawSprawdzony(!w.sprawdzony, true));
+  const poprzedni = el('button', { type: 'button', text: '← Poprzedni skan', title: 'Poprzedni wycinek',
+    onclick: () => { const k = sasiedniaKarta(s, -1); if (k) pokazKarte(k); } });
+  const nastepny = el('button', { type: 'button', text: 'Następny skan →', title: 'Następny wycinek (bez oznaczania)',
+    onclick: () => { const k = sasiedniaKarta(s, 1); if (k) pokazKarte(k); } });
   const img = el('img', { loading: 'lazy', alt: `wycinek ${w.wycinek}` });
   if (WWW) WWW.obraz(img, st.sciezka, w.plik);       // zaszyfrowany na GitHubie - odszyfrowuje www.js
   else img.src = `/api/obraz?sciezka=${enc(st.sciezka)}&plik=${enc(w.plik)}&v=${w.zmieniony}`;
   const obraz = el('div', { class: 'obraz', title: 'Kliknij, żeby powiększyć' }, img);
   img.addEventListener('click', () => obraz.classList.toggle('duzy'));
   const szczegoly = el('details', { open: st.otwarte && !w.sprawdzony },
-    el('summary', { text: 'Wszystkie pola (możesz poprawić każde)' }),
+    el('summary', { text: GENETEKA ? 'Łacina i format Geneteki (możesz poprawić każde pole)' : 'Wszystkie pola (możesz poprawić każde)' }),
     el('div', { class: 'cialo' }));
   szczegoly.addEventListener('toggle', () => { if (szczegoly.open) $$('textarea', szczegoly).forEach(dopasujWysokosc); });
   s.append(
@@ -716,9 +901,41 @@ function karta(w) {
       el('span', { class: 'znaczek ok poprawki ukryta', title: 'Pola poprawione względem odczytu AI – przy każdym z nich jest ✓' }),
       el('span', { class: 'prawo' }, rodzaj, sprawdzone[0])),
     obraz, szczegoly,
-    el('div', { class: 'stopka' }, sprawdzone[1]));
+    el('div', { class: 'stopka' }, poprzedni, sprawdzone[1], nastepny));
   zaznaczFlagiKarty(s, w);
   return s;
+}
+
+/** Następna (kierunek 1) albo poprzednia (-1) widoczna karta. */
+function sasiedniaKarta(karta, kierunek) {
+  let k = karta;
+  do k = kierunek > 0 ? k.nextElementSibling : k.previousElementSibling;
+  while (k && k.classList.contains('ukryta'));
+  return k;
+}
+
+/* Przejście do wycinka: karta od góry, a gdy cała się nie mieści – przewinięta tak, żeby było widać cały
+   „Format Geneteki” (wycinek skanu zostaje przyklejony u góry, łacina chowa się pod nim). */
+function pokazKarte(k) {
+  if (!k.dataset.gotowa) rysujPola(k);
+  k.scrollIntoView({ block: 'start' });
+  requestAnimationFrame(() => {
+    const g = $('.sekcja-geneteki', k);
+    if (!g || !g.offsetParent) return;
+    const r = g.getBoundingClientRect();
+    const nadGeneteka = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--wys-naglowka')) || 53)
+      + $('.obraz', k).offsetHeight + 8;
+    const o = Math.min(r.bottom - window.innerHeight + 12, r.top - nadGeneteka);
+    if (o > 0) window.scrollBy(0, o);
+  });
+}
+
+/** Karta, w której jesteś: z kursorem w polu albo pierwsza widoczna pod nagłówkiem. */
+function biezacaKarta() {
+  const a = document.activeElement && document.activeElement.closest && document.activeElement.closest('.karta');
+  if (a) return a;
+  const gora = $('header').offsetHeight + 40;
+  return $$('.karta').find((k) => !k.classList.contains('ukryta') && k.getBoundingClientRect().bottom > gora) || null;
 }
 
 function pole(w, klucz, jezyk, dlugi, podpowiedz) {
@@ -745,6 +962,14 @@ function wybor(w, klucz, opcje) {
 function rysujPola(karta) {
   const w = st.mapa.get(karta.dataset.wycinek);
   const cialo = $('.cialo', karta);
+  if (GENETEKA) {
+    // łacina (oryginał) w polach obok siebie, a pod nią ten sam akt w formacie Geneteki
+    cialo.replaceChildren(sekcjaLaciny(w), ...(w.rodzaj === 'akt' ? [sekcjaGeneteki(w)] : []));
+    karta.dataset.gotowa = '1';
+    zaznaczFlagiKarty(karta, w);
+    requestAnimationFrame(() => $$('textarea', cialo).forEach(dopasujWysokosc));
+    return;
+  }
   const wiersze = [];
   const wiersz = (etykieta, klucz, ...komorki) => {
     const tr = el('tr', {}, el('th', { class: 'etykieta', text: etykieta }), ...komorki);
@@ -791,15 +1016,275 @@ function dopasujWysokosc(t) {
   t.style.height = (t.scrollHeight + 2) + 'px';
 }
 
+/** Szerokość pola łaciny według długości tekstu (pola stoją obok siebie jak w „genetyka weryfikacja”). */
+function dopasujSzerokosc(e) {
+  if (e.tagName === 'INPUT') e.size = Math.max(5, Math.min(42, (e.value || e.placeholder || '').length + 2));
+}
+
+// ---------------------------------------------------------------- karta: łacina
+
+function sekcjaLaciny(w) {
+  const krotkie = el('div', { class: 'siatka' }), dlugie = el('div', { class: 'dlugie' });
+  const f = st.flagi.get(w.wycinek) || {};
+  let pustych = 0;
+  const dodaj = (k, etykieta, kontrolka, dlugi) => {
+    const pusty = !String(kontrolka.value || '').trim();
+    const schowany = pusty && !ZAWSZE_WIDOCZNE.has(k) && !f[k] && !w.niepewne.includes(k);
+    if (schowany) pustych++;
+    dopasujSzerokosc(kontrolka);
+    (dlugi ? dlugie : krotkie).append(el('div', { class: 'pole' + (schowany ? ' pusty' : '') },
+      el('span', { class: 'etykieta', text: etykieta }),
+      el('div', { class: 'z-ptaszkiem' }, kontrolka, el('span', { class: 'ptaszek', text: '✓', 'aria-hidden': 'true' }))));
+  };
+  const pola = w.rodzaj === 'akt' ? POLA
+    : [['tekst', 'Tekst', 'dlugi'], ...(w.rodzaj === 'poswiadczenie' ? [['ksiadz', 'Ksiądz', 'tekst']] : [])];
+  for (const [k, etykieta, rodzaj] of pola) {
+    if (rodzaj === 'wspolne') dodaj(k, etykieta, pole(w, k, 'oba', false));
+    else if (rodzaj === 'tak_nie') dodaj(k, etykieta, wybor(w, k, [['', '—'], ['tak', 'tak'], ['nie', 'nie']]));
+    else if (rodzaj === 'plec') dodaj(k, etykieta, wybor(w, k, [['', '—'], ['M', 'M – mężczyzna'], ['K', 'K – kobieta']]));
+    else if (rodzaj === 'typ') dodaj(k, etykieta, wybor(w, k, [['', '—'], ...Object.entries(TYPY)]));
+    else if (rodzaj === 'miesiac') {
+      dodaj(k, etykieta, wybor(w, k, [['', '—'], ...NAZWY_MIESIECY.map((n, i) => [String(i + 1), `${i + 1} – ${n}`])]));
+    } else dodaj(k, etykieta, pole(w, k, 'lacina', rodzaj === 'dlugi'), rodzaj === 'dlugi');
+  }
+  dodaj('uwagi', 'Uwagi (Twoje notatki do wycinka)', pole(w, 'uwagi', 'oba', true, 'problem z wycinkiem, Twoje notatki…'), true);
+  const przycisk = pustych ? el('button', { type: 'button', class: 'b-puste', onclick: przelaczPuste }) : null;
+  if (przycisk) {
+    przycisk.dataset.ile = pustych;
+    przycisk.textContent = st.pokazPuste ? 'Ukryj puste pola' : `Pokaż puste pola (${pustych})`;
+  }
+  return el('div', { class: 'sekcja-karty sekcja-laciny' },
+    el('h3', {}, el('span', { text: w.rodzaj === 'akt' ? 'Łacina' : 'Tekst wycinka' }),
+      el('span', { class: 'opis', text: '(odczyt AI – oryginał; popraw, jeśli źle odczytany)' }),
+      przycisk ? el('span', { class: 'prawo' }, przycisk) : null),
+    krotkie, dlugie);
+}
+
+function przelaczPuste() {
+  st.pokazPuste = !st.pokazPuste;
+  try { localStorage.setItem('pokazPuste', st.pokazPuste ? '1' : '0'); } catch (e) { /* bez znaczenia */ }
+  $('#karty').classList.toggle('pokaz-puste', st.pokazPuste);
+  for (const b of $$('.b-puste')) b.textContent = st.pokazPuste ? 'Ukryj puste pola' : `Pokaż puste pola (${b.dataset.ile})`;
+}
+
+// ---------------------------------------------------------------- karta: format Geneteki
+
+function sekcjaGeneteki(w) {
+  const sekcja = el('div', { class: 'sekcja-karty sekcja-geneteki' },
+    el('h3', {}, el('span', { text: 'Format Geneteki' }),
+      el('span', { class: 'prawo' }, el('button', { type: 'button', text: 'Duplikuj wiersz (bliźnięta)',
+        title: 'Dodaj drugi wiersz z tym samym numerem aktu (np. bliźnięta w jednym akcie)', onclick: () => duplikujWiersz(w) }))),
+    el('p', { class: 'podpowiedz' }, el('span', { class: 'probka do-sprawdzenia' }), ' do sprawdzenia (najedź na pole) ',
+      el('span', { class: 'ptaszek widoczny', text: '✓' }), ' zmieniono ręcznie (kliknij ✓, żeby przywrócić wartość automatyczną)'),
+    el('div', { class: 'wiersze-geneteki' }));
+  rysujWierszeGeneteki(sekcja, w);
+  return sekcja;
+}
+
+function rysujWierszeGeneteki(sekcja, w) {
+  const wiersze = wierszeGeneteki(w);
+  const wynik = st.gen.get(w.wycinek);
+  $('.wiersze-geneteki', sekcja).replaceChildren(...wiersze.map((r) => rysujWierszGeneteki(w, wynik, r, wiersze.length)));
+  requestAnimationFrame(() => $$('textarea', sekcja).forEach(dopasujWysokosc));
+}
+
+function rysujWierszGeneteki(w, wynik, r, ile) {
+  const blok = el('div', { class: 'wiersz-geneteki', 'data-wiersz': String(r.nr) });
+  if (ile > 1) {
+    blok.append(el('h4', {}, `Wiersz ${r.nr + 1}`, r.nr > 0
+      ? el('button', { type: 'button', text: 'Usuń ten wiersz', onclick: () => usunWiersz(w, r.nr) })
+      : el('span', { class: 'opis', text: '(główny)' })));
+  }
+  const siatka = el('div', { class: 'siatka-geneteki' });
+  for (const k of K.KOLUMNY) {
+    const etykieta = el('span', { class: 'etykieta' }, el('span', { class: 'litera', text: k }), ' ',
+      K.WYMAGANE.includes(k) ? el('b', { text: K.NAGLOWKI[k] }) : K.NAGLOWKI[k]);
+    let e;
+    if (k === 'A') {
+      e = el('input', { type: 'text', value: r.nr > 0 ? '(kolejny)' : 'automatycznie', readOnly: true, class: 'tylko-odczyt',
+        tabIndex: -1, title: 'L.p. jest numerowane automatycznie przy zapisie xlsx' });
+    } else if (SZEROKIE_GEN.has(k)) {
+      e = el('textarea', { rows: 2, spellcheck: false });
+      e.value = r.wartosci[k] ?? '';
+    } else {
+      e = el('input', { type: 'text', spellcheck: false });
+      e.value = r.wartosci[k] ?? '';
+    }
+    e.dataset.kol = k;
+    e.setAttribute('aria-label', `${k} ${K.NAGLOWKI[k]}`);
+    const ptaszek = el('span', { class: 'ptaszek', text: '✓', role: 'button', tabIndex: -1 });
+    ptaszek.addEventListener('click', () => przywrocGeneteke(w, r.nr, k));
+    if (k !== 'A') {
+      e.addEventListener('input', () => {
+        if (e.tagName === 'TEXTAREA') dopasujWysokosc(e);
+        zmienPoleGeneteki(w, r.nr, k, e.value);
+      });
+    }
+    siatka.append(el('div', { class: `pole${SZEROKIE_GEN.has(k) ? ' szerokie' : SREDNIE_GEN.has(k) ? ' sredni' : ''}` },
+      etykieta, el('span', { class: 'z-ptaszkiem' }, e, ptaszek)));
+  }
+  blok.append(siatka, el('ul', { class: 'powody ukryta' }));
+  if (r.nr === 0 && wynik.podpowiedzi.length) {
+    blok.append(el('div', { class: 'dopiski' }, wynik.podpowiedzi.map((t) => el('div', { class: 'dopisek' },
+      el('b', { text: 'Inne informacje z aktu:' }), el('span', { text: t }),
+      el('button', { type: 'button', text: 'Dopisz do uwag', title: 'Dopisuje tekst na końcu kolumny „uwagi” – potem zostaw tylko to, co jest w oryginale',
+        onclick: () => dopiszDoUwag(w, r.nr, t) })))));
+  }
+  odswiezStanWierszaGeneteki(blok, w, r);
+  return blok;
+}
+
+/** Kolory, ptaszki i lista powodów „do sprawdzenia” bez przerysowywania pól (kursor zostaje w polu). */
+function odswiezStanWierszaGeneteki(blok, w, r) {
+  for (const k of K.KOLUMNY) {
+    const e = blok.querySelector(`[data-kol="${k}"]`);
+    if (!e) continue;
+    const opak = e.closest('.pole');
+    const flagi = r.flagi[k];
+    e.classList.toggle('do-sprawdzenia', !!flagi);
+    opak.classList.toggle('ma-flage', !!flagi);
+    e.title = flagi ? flagi.join('\n') : '';
+    const p = r.poprawki[k];
+    const ptaszek = opak.querySelector('.ptaszek');
+    ptaszek.classList.toggle('widoczny', !!p);
+    ptaszek.title = p ? `Zmieniono ręcznie. Automatycznie: „${r.auto[k] || '(puste)'}”. Kliknij, żeby przywrócić.` : '';
+  }
+  const pozycje = [];
+  for (const k of K.KOLUMNY) {
+    for (const powod of r.flagi[k] || []) {
+      const li = el('li', {}, el('b', { text: `${k} (${K.NAGLOWKI[k]}): ` }), powod);
+      if (r.zmiany[k] && powod.startsWith('odczyt się zmienił')) {
+        li.append(el('button', { type: 'button', text: 'Zostaw moją', onclick: () => potwierdzPoprawke(w, r.nr, k) }),
+          el('button', { type: 'button', text: 'Weź nową', onclick: () => przywrocGeneteke(w, r.nr, k) }));
+      }
+      pozycje.push(li);
+    }
+  }
+  const ul = blok.querySelector('.powody');
+  ul.replaceChildren(...pozycje);
+  ul.classList.toggle('ukryta', !pozycje.length);
+}
+
+/** Po przeliczeniu: nowe wartości automatyczne (poza poprawionymi ręcznie i polem z kursorem) i podświetlenia. */
+function odswiezGeneteke(karta, w) {
+  const sekcja = $('.sekcja-geneteki', karta);
+  if (!sekcja) return;
+  const wiersze = wierszeGeneteki(w);
+  const bloki = $$('.wiersz-geneteki', sekcja);
+  if (bloki.length !== wiersze.length) return rysujWierszeGeneteki(sekcja, w);
+  wiersze.forEach((r, i) => {
+    for (const k of K.KOLUMNY) {
+      if (k === 'A' || r.poprawki[k]) continue;
+      const e = bloki[i].querySelector(`[data-kol="${k}"]`);
+      const v = r.wartosci[k] ?? '';
+      if (e && e !== document.activeElement && e.value !== v) {
+        e.value = v;
+        if (e.tagName === 'TEXTAREA') dopasujWysokosc(e);
+      }
+    }
+    odswiezStanWierszaGeneteki(bloki[i], w, r);
+  });
+}
+
+function kartaWycinka(w) {
+  return document.getElementById('w-' + w.wycinek);
+}
+
+function poZmianieGeneteki(w, przerysuj = false) {
+  // jeden wiersz bez poprawek = nic do zapamiętania
+  if (w.geneteka && w.geneteka.wiersze.length === 1 && !Object.keys(w.geneteka.wiersze[0].poprawki || {}).length) w.geneteka = null;
+  w.zmieniono = Date.now();
+  zaplanujZapis();
+  const karta = kartaWycinka(w);
+  if (!karta) return;
+  if (przerysuj) rysujWierszeGeneteki($('.sekcja-geneteki', karta), w);
+  else odswiezGeneteke(karta, w);
+  zaznaczFlagiKarty(karta, w);
+  odswiezLiczniki();
+}
+
+function wierszGeneteki(w, nr) {
+  if (!w.geneteka || !w.geneteka.wiersze.length) w.geneteka = { wiersze: [{ poprawki: {} }] };
+  const r = w.geneteka.wiersze[nr] || (w.geneteka.wiersze[nr] = { poprawki: {} });
+  r.poprawki = r.poprawki || {};
+  return r;
+}
+
+function zmienPoleGeneteki(w, nr, k, wartosc) {
+  const auto = st.gen.get(w.wycinek).wiersz[k];
+  const r = wierszGeneteki(w, nr);
+  if (wartosc === auto) delete r.poprawki[k];
+  else r.poprawki[k] = { wartosc, auto };
+  poZmianieGeneteki(w);
+}
+
+function przywrocGeneteke(w, nr, k) {
+  const r = w.geneteka && w.geneteka.wiersze[nr];
+  if (!r || !r.poprawki || !r.poprawki[k]) return;
+  delete r.poprawki[k];
+  poZmianieGeneteki(w, true);
+}
+
+function potwierdzPoprawke(w, nr, k) {
+  const r = w.geneteka && w.geneteka.wiersze[nr];
+  if (r && r.poprawki && r.poprawki[k]) r.poprawki[k].auto = st.gen.get(w.wycinek).wiersz[k];
+  poZmianieGeneteki(w);
+}
+
+function dopiszDoUwag(w, nr, tekstD) {
+  const karta = kartaWycinka(w);
+  const e = karta && karta.querySelector(`.wiersz-geneteki[data-wiersz="${nr}"] textarea[data-kol="M"]`);
+  if (!e) return;
+  const dopisek = K.czysc(K.ulamkiNaDziesietne(tekstD)).replace(/\.\s*$/, '');
+  e.value = e.value ? `${e.value.replace(/[\s,]+$/, '')}, ${dopisek}` : dopisek;
+  e.dispatchEvent(new Event('input'));
+  e.focus();
+}
+
+function duplikujWiersz(w) {
+  const pierwszy = wierszGeneteki(w, 0);
+  // drugi wiersz zaczyna jako kopia pierwszego (z jego poprawkami)
+  w.geneteka.wiersze.push({ poprawki: JSON.parse(JSON.stringify(pierwszy.poprawki)) });
+  poZmianieGeneteki(w, true);
+  toast('Dodano drugi wiersz z tym samym numerem aktu – popraw imię i uwagi.');
+  const karta = kartaWycinka(w);
+  const nowy = karta && karta.querySelector(`.wiersz-geneteki[data-wiersz="${w.geneteka.wiersze.length - 1}"]`);
+  if (nowy) nowy.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function usunWiersz(w, nr) {
+  okno('Usunąć wiersz?', [el('p', { text: `Wiersz ${nr + 1} tego aktu (format Geneteki) zostanie usunięty.` })], [
+    el('button', { class: 'glowny', text: 'Usuń', onclick: () => {
+      zamknijOkno();
+      if (!w.geneteka) return;
+      w.geneteka.wiersze.splice(nr, 1);
+      poZmianieGeneteki(w, true);
+    } }),
+  ]);
+}
+
+/** Przeliczenie Geneteki po zmianie odczytu (łaciny, dat, linków) we wszystkich narysowanych kartach. */
+function odswiezWszystkieKarty() {
+  przeliczGeneteke();
+  for (const k of $$('.karta')) {
+    const w = st.mapa.get(k.dataset.wycinek);
+    if (k.dataset.gotowa) odswiezGeneteke(k, w);
+    zaznaczFlagiKarty(k, w);
+  }
+  odswiezLiczniki();
+}
+
 function zaznaczFlagiKarty(karta, w) {
   const f = st.flagi.get(w.wycinek) || {};
-  const ile = Object.keys(f).length;
+  const fg = flagiGeneteki(w);
+  const kolumnyGen = new Set(fg.map((t) => t.split(' ')[0]));
+  const ile = Object.keys(f).length + kolumnyGen.size;
   karta.classList.toggle('ma-flagi', ile > 0 && !w.sprawdzony);
   const znaczek = $('.znaczek', karta);
   if (znaczek) {
     znaczek.classList.toggle('ukryta', ile === 0);
     znaczek.textContent = `do sprawdzenia: ${ile}`;
-    znaczek.title = Object.values(f).flat().filter((v, i, a) => a.indexOf(v) === i).join('\n');
+    znaczek.title = [...Object.values(f).flat(), ...fg.map((t) => `Geneteka ${t}`)].filter((v, i, a) => a.indexOf(v) === i).join('\n');
   }
   const ilePoprawek = liczPoprawione(w);
   const poprawki = $('.poprawki', karta);
@@ -814,6 +1299,8 @@ function zaznaczFlagiKarty(karta, w) {
     }
     const komunikaty = f[e.dataset.pole];
     e.classList.toggle('podejrzane', !!komunikaty);
+    const opak = e.closest('.pole');
+    if (opak) opak.classList.toggle('ma-flage', !!komunikaty);
     e.classList.toggle('niepewne', w.niepewne.includes(e.dataset.pole));
     const tytuly = [];
     if (komunikaty) tytuly.push(...komunikaty);
@@ -861,8 +1348,7 @@ function poZmianie(karta, w) {
     uzupelnijMiesiace();
     uzupelnijNazwiskaDzieci();
     obliczFlagi();
-    for (const k of $$('.karta')) zaznaczFlagiKarty(k, st.mapa.get(k.dataset.wycinek));
-    odswiezLiczniki();
+    odswiezWszystkieKarty();          // przelicza też format Geneteki (zmiana łaciny, dat, numeru domu…)
     zastosujFiltr(true);
   }, 300);
 }
@@ -999,6 +1485,8 @@ function obsluzZmiane(e) {
     w.edytowane.add(`lacina.${klucz}`).add(`polski.${klucz}`);
   } else {
     const poprzednia = w[jezyk][klucz];
+    // wpisany wiek po polsku zaokrągla się po wyjściu z pola („1½ roku” -> „1,5 roku”)
+    if (e.type === 'change' && jezyk === 'polski' && klucz === 'wiek') t.value = wiekPolski(t.value);
     w[jezyk][klucz] = t.value;
     w.edytowane.add(`${jezyk}.${klucz}`);
     const jezyki = [jezyk];
@@ -1019,6 +1507,7 @@ function obsluzZmiane(e) {
   }
   if (klucz === 'miesiac') w.miesiacAuto = false;
   if (t.tagName === 'TEXTAREA') dopasujWysokosc(t);
+  else if (t.closest('.siatka')) dopasujSzerokosc(t);
   poZmianie(karta, w);
 }
 
@@ -1059,7 +1548,7 @@ async function zapiszTeraz() {
     const r = await API.post('/api/zapisz', daneDoZapisu());
     const d = await r.json();
     ustawStanZapisu(d.komunikat || 'Zapisano ' + d.zapisano.slice(11), !!d.ostrzezenie);
-    ustawStanWDrzewie(d.pobrano ? 'gotowe_zmiany' : 'w_trakcie');
+    ustawStanWDrzewie(d.pobrano ? (d.zmiany_po_pobraniu === false ? 'gotowe' : 'gotowe_zmiany') : 'w_trakcie');
     if (d.nowsze) toast(`Pomocnik poprawił na stronie www ${d.nowsze} z tych wycinków – kliknij „Odśwież”, żeby zobaczyć jego wersję.`);
   } catch (e) {
     st.brudne = true;
@@ -1077,7 +1566,7 @@ function odswiezLiczniki() {
   const n = st.wycinki.length;
   const akty = st.wycinki.filter((w) => w.rodzaj === 'akt').length;
   const sprawdzone = st.wycinki.filter((w) => w.sprawdzony).length;
-  const zFlagami = st.wycinki.filter((w) => st.flagi.has(w.wycinek) && !w.sprawdzony).length;
+  const zFlagami = st.wycinki.filter((w) => !w.sprawdzony && maFlagi(w)).length;
   $('#licznik').replaceChildren(
     'Wycinków: ', el('b', { text: String(n) }), ` (aktów ${akty}) · sprawdzone: `, el('b', { text: `${sprawdzone}/${n}` }),
     ' · z podświetleniami: ', el('b', { text: String(zFlagami) }));
@@ -1089,7 +1578,7 @@ function zastosujFiltr(tylkoKlasy = false) {
     const w = st.mapa.get(k.dataset.wycinek);
     let widoczna = true;
     if (st.filtr === 'niesprawdzone') widoczna = !w.sprawdzony;
-    if (st.filtr === 'flagi') widoczna = st.flagi.has(w.wycinek) || w.niepewne.length > 0;
+    if (st.filtr === 'flagi') widoczna = maFlagi(w) || w.niepewne.length > 0;
     if (st.filtr === 'poprawione') widoczna = liczPoprawione(w) > 0;
     // karta, którą właśnie edytujesz, nie znika spod kursora
     if (tylkoKlasy && !widoczna && k.contains(document.activeElement)) continue;
@@ -1101,6 +1590,7 @@ function zastosujFiltr(tylkoKlasy = false) {
 
 async function pobierz() {
   if (!st.sciezka) return;
+  if (GENETEKA) return pobierzGeneteke();
   clearTimeout(st.zapisTimer);
   const przycisk = $('#b-pobierz');
   przycisk.disabled = true;
@@ -1126,6 +1616,146 @@ async function pobierz() {
   }
 }
 
+/** Okno z pytaniem: true po kliknięciu przycisku „tak”, false po „Zamknij”. */
+function zapytaj(tytul, cialo, tak) {
+  return new Promise((rozwiaz) => {
+    okno(tytul, cialo, [el('button', { class: 'glowny', text: tak, onclick: () => { zamknijOkno(); rozwiaz(true); } })]);
+    $('#okno-przyciski').lastElementChild.addEventListener('click', () => rozwiaz(false));
+  });
+}
+
+function naBase64(bajty) {
+  let s = '';
+  for (let i = 0; i < bajty.length; i += 0x8000) s += String.fromCharCode.apply(null, bajty.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+function nazwaXlsxGeneteki(parafia, lata) {
+  return `${NAZWY_PARAFII[parafia] || `${parafia || 'parafia'}-Z`}-${lata}.xlsx`;
+}
+
+/** Wiersze dla Geneteki całego rocznika, w kolejności wycinków (bliźnięta: kilka wierszy jednego aktu). */
+function wierszeRocznika() {
+  const wiersze = [];
+  for (const wycinek of st.gen.keys()) for (const r of wierszeGeneteki(st.mapa.get(wycinek))) wiersze.push(r.wartosci);
+  return wiersze;
+}
+
+/* „Pobierz xlsx genetyka”: plik dla Geneteki (szablon indeksy.xlsx, arkusz Zgony) zapisany w folderze rocznika,
+   np. Przytkowice/Zgony/1890/Przytkowice-Z-przenajswietszej-trojcy-1890.xlsx. */
+async function pobierzGeneteke() {
+  clearTimeout(st.zapisTimer);
+  przeliczGeneteke();
+  const akty = [...st.gen.keys()].map((k) => st.mapa.get(k));
+  const niesprawdzone = akty.filter((w) => !w.sprawdzony).map((w) => w.lacina.nr || w.wycinek);
+  const puste = [];
+  for (const w of akty) {
+    for (const r of wierszeGeneteki(w)) {
+      const brak = K.WYMAGANE.filter((k) => !String(r.wartosci[k] || '').trim());
+      if (brak.length) puste.push(`akt ${r.wartosci.C || '?'}: ${brak.map((k) => K.NAGLOWKI[k]).join(', ')}`);
+    }
+  }
+  const ostrzezenia = [];
+  if (niesprawdzone.length) {
+    ostrzezenia.push(`Niesprawdzone akty (${niesprawdzone.length}): ${niesprawdzone.slice(0, 30).join(', ')}${niesprawdzone.length > 30 ? '…' : ''}`);
+  }
+  if (puste.length) ostrzezenia.push(`Puste pola wymagane: ${puste.slice(0, 10).join('; ')}${puste.length > 10 ? '…' : ''}`);
+  if (akty.length && !akty.some((w) => wierszeGeneteki(w).some((r) => r.wartosci.L))) {
+    ostrzezenia.push('Brak linku do jednostki w Skanotece (kolumna „plik”) – wklej go w „Link do skanów”.');
+  }
+  if (!akty.length) return toast('W tym roczniku nie ma aktów do zapisania.');
+  const nazwa = nazwaXlsxGeneteki(st.opis.parafia, st.opis.rok);
+  if (ostrzezenia.length && !await zapytaj('Zapisać xlsx mimo uwag?', [el('ul', {}, ostrzezenia.map((o) => el('li', { text: o })))],
+    'Zapisz mimo to')) return;
+  const przycisk = $('#b-pobierz');
+  przycisk.disabled = true;
+  try {
+    const plik = await XL.zbudujXlsx(window.JSZip, SZABLON, wierszeRocznika());
+    const d = await (await API.post('/api/xlsx_geneteki', { ...daneDoZapisu(), nazwa, xlsx: naBase64(plik) })).json();
+    st.brudne = false;
+    ustawStanZapisu(WWW ? 'Zapisano, xlsx pobrany' : 'Zapisano i zapisano xlsx');
+    ustawStanWDrzewie('gotowe');
+    toast(d.komunikat || `Zapisano ${nazwa} w folderze ${d.folder}`);
+    if (!WWW) pokazPropozycjeSlowniczka();         // słowniczek (prompt dla AI) jest na komputerze
+  } catch (e) {
+    toast('Nie udało się zapisać pliku xlsx: ' + e.message);
+  } finally {
+    przycisk.disabled = false;
+  }
+}
+
+/* „Scal lata”: zapisane xlsx Geneteki kilku roczników w jeden plik (rocznik pod rocznikiem, ciągła L.p.)
+   w folderze księgi, np. Przytkowice/Zgony/Przytkowice-Z-przenajswietszej-trojcy-1890-1896.xlsx. */
+async function scalLata() {
+  if (!st.sciezka || !GENETEKA) return toast('Otwórz najpierw rocznik zgonów.');
+  await zapiszTeraz();
+  let d;
+  try {
+    d = await API.get('/api/geneteka_lata?sciezka=' + enc(st.sciezka));
+  } catch (e) {
+    return toast('Nie udało się odczytać roczników: ' + e.message);
+  }
+  const pozycje = d.lata.map((r) => {
+    const nazwa = nazwaXlsxGeneteki(d.parafia, r.rok);
+    const jest = r.pliki.some((p) => p.normalize('NFC') === nazwa.normalize('NFC'));
+    const info = [];
+    if (!jest) info.push('brak xlsx Geneteki');
+    else {
+      info.push(`sprawdzone ${r.sprawdzone}/${r.akty}`);
+      if (r.zmiany_po_pobraniu) info.push('zmiany po zapisie xlsx – zapisz ponownie');
+    }
+    return { r, nazwa, jest, pelny: r.akty > 0 && r.sprawdzone >= r.akty && !r.zmiany_po_pobraniu, info: info.join(' · ') };
+  });
+  const dostepne = pozycje.filter((p) => p.jest);
+  if (dostepne.length < 2) {
+    return okno('Scal lata', [el('p', { text: 'Do scalenia potrzebne są co najmniej dwa roczniki z zapisanym xlsx Geneteki '
+      + `(przycisk „Pobierz xlsx genetyka”). Teraz: ${dostepne.length}.` })], []);
+  }
+  const lista = el('ul', { class: 'lata' }, pozycje.map((p) => el('li', {},
+    el('input', { type: 'checkbox', id: `rok-${p.r.rok}`, checked: p.jest, disabled: !p.jest, 'data-rok': String(p.r.rok) }),
+    el('label', { for: `rok-${p.r.rok}`, text: String(p.r.rok) }),
+    el('span', { class: `info${!p.jest || !p.pelny ? ' uwaga' : ''}`, text: p.info }))));
+  if (!await zapytaj('Scal lata – jeden plik dla Geneteki', [
+    el('p', { text: 'Zaznacz roczniki. W pliku wynikowym będą jeden pod drugim, bez powtarzania nagłówków i bez pustych wierszy, z ciągłą L.p.' }),
+    lista], 'Dalej')) return;
+  const lata = $$('input:checked', lista).map((c) => +c.dataset.rok).sort((a, b) => a - b);
+  if (lata.length < 2) return toast('Zaznacz co najmniej dwa roczniki.');
+  const wybrane = pozycje.filter((p) => lata.includes(p.r.rok));
+  const ostrzezenia = [];
+  const dziury = [];
+  for (let y = lata[0]; y <= lata[lata.length - 1]; y++) if (!lata.includes(y)) dziury.push(y);
+  if (dziury.length) {
+    ostrzezenia.push(`W zakresie ${lata[0]}–${lata[lata.length - 1]} brakuje lat: ${dziury.join(', ')} (nazwa pliku i tak poda cały zakres).`);
+  }
+  const niepelne = wybrane.filter((p) => !p.pelny).map((p) => `${p.r.rok} (${p.info})`);
+  if (niepelne.length) ostrzezenia.push(`Nie w pełni sprawdzone albo zmienione po zapisie xlsx: ${niepelne.join(', ')}.`);
+  const nazwa = nazwaXlsxGeneteki(d.parafia, `${lata[0]}-${lata[lata.length - 1]}`);
+  if (!await zapytaj('Scal lata', [
+    el('p', {}, 'Powstanie plik ', el('b', { text: nazwa }), ` w folderze ${d.folder}.`),
+    ostrzezenia.length ? el('ul', {}, ostrzezenia.map((o) => el('li', { text: o }))) : null,
+  ].filter(Boolean), ostrzezenia.length ? 'Scal mimo to' : 'Scal')) return;
+  try {
+    const wszystkie = [];
+    for (const p of wybrane) {
+      const sep = p.r.sciezka.includes('\\') ? '\\' : '/';
+      const adres = '/api/plik_xlsx?sciezka=' + enc(p.r.sciezka + sep + p.nazwa);
+      let bufor;
+      if (WWW) bufor = await WWW.binarny(adres);
+      else {
+        const r = await fetch(adres);
+        if (!r.ok) throw new Error(`nie udało się odczytać ${p.nazwa} (błąd ${r.status})`);
+        bufor = await r.arrayBuffer();
+      }
+      wszystkie.push(...await XL.czytajZgony(window.JSZip, bufor));
+    }
+    const plik = await XL.zbudujXlsx(window.JSZip, SZABLON, wszystkie);
+    const z = await (await API.post('/api/xlsx_scalone', { folder: d.folder, nazwa, xlsx: naBase64(plik) })).json();
+    toast(z.komunikat || `Zapisano ${nazwa} (${wszystkie.length} wierszy) w folderze ${z.folder}`);
+  } catch (e) {
+    toast('Nie udało się scalić lat: ' + e.message);
+  }
+}
+
 /* Po pobraniu xlsx: propozycje do słowniczka (prompt dla AI) z aktów oznaczonych jako sprawdzone.
    Zaznaczone serwer dopisuje do slowniczek.md, odznaczone zapamiętuje i już ich nie proponuje. */
 /* Linki do skanów: zakresy wycinków (od–do) z linkiem do zdjęcia strony księgi, np. w Skanotece.
@@ -1133,18 +1763,18 @@ async function pobierz() {
 function linkSkanu(wycinek) {
   const n = parseInt(wycinek, 10);
   const l = (st.linki || []).find((x) => n >= x.od && n <= x.do);
-  return l ? l.url : null;
+  if (l) return l.url;
+  if (!GENETEKA) return null;
+  // bez zakresów: strona księgi z Tartaka (z którego zdjęcia jest wycinek) w jednostce z „Link do skanów”
+  const jednostka = st.link || K.linkRocznika({ linki_skanow: st.linki });
+  const m = jednostka.match(/id(\d+)-sy(\d+)-kt(\d+)/);
+  const plik = st.skany && st.skany[wycinek];
+  if (m && plik) return `https://skanoteka.genealodzy.pl/index.php?op=pg&id=${m[1]}&se=&sy=${m[2]}&kt=${m[3]}&plik=${enc(plik)}`;
+  return jednostka || null;
 }
 
-function odswiezLinkiSkanow() {
-  for (const k of $$('.karta')) {
-    const a = $('.link-skanu', k), url = linkSkanu(k.dataset.wycinek);
-    a.classList.toggle('ukryta', !url);
-    a.href = url || '#';
-  }
-}
-
-function pokazLinkiSkanow() {
+/** Tabela „od wycinka – do wycinka – link do strony księgi” (w oknie linków). odczytaj() -> lista albo null (błąd). */
+function tabelaZakresow() {
   const tbody = el('tbody');
   const dodajWiersz = (l = {}) => {
     const od = el('input', { type: 'number', min: 1, value: l.od ?? '' });
@@ -1157,27 +1787,96 @@ function pokazLinkiSkanow() {
   };
   const ostatni = st.wycinki.length ? parseInt(st.wycinki[st.wycinki.length - 1].wycinek, 10) : '';
   (st.linki.length ? st.linki : [{ od: 1, do: ostatni }]).forEach(dodajWiersz);
-  okno('Linki do skanów', [
-    el('p', { text: 'Wpisz zakres wycinków i link do zdjęcia strony księgi, z której pochodzą (np. wycinki 1–12 → strona 2 '
-      + 'w Skanotece). Link pokaże się przy wycinku i trafi do kolumny „Skan” w pobieranym xlsx.' }),
+  const wezly = [
     el('table', { class: 'linki-skanow' },
       el('thead', {}, el('tr', {}, el('th', { text: 'Od wycinka' }), el('th', { text: 'Do wycinka' }),
         el('th', { text: 'Link do skanu' }), el('th'))),
       tbody),
     el('div', {}, el('button', { text: '+ Dodaj wiersz', onclick: () => dodajWiersz({}) })),
+  ];
+  const odczytaj = () => {
+    const linki = [];
+    for (const tr of $$('tr', tbody)) {
+      const od = parseInt(tr.pola.od.value, 10), doo = parseInt(tr.pola.doo.value, 10), url = tr.pola.url.value.trim();
+      if (!url) continue;                     // wiersz bez linku (np. sam podpowiedziany zakres) się nie liczy
+      if (!(od >= 1) || !(doo >= od)) { toast(`Zły zakres wycinków: ${tr.pola.od.value || '?'}–${tr.pola.doo.value || '?'}`); return null; }
+      if (!/^https?:\/\//i.test(url)) { toast(`Wiersz ${od}–${doo}: link musi zaczynać się od http:// albo https://`); return null; }
+      linki.push({ od, do: doo, url });
+    }
+    return linki.sort((a, b) => a.od - b.od);
+  };
+  return { wezly, odczytaj };
+}
+
+/* Format Geneteki: „Link do skanów” = link do jednostki w Skanotece (np. https://skanoteka.genealodzy.pl/id5557-sy5500-kt10)
+   – trafia do kolumny „plik” wszystkich aktów (zapis: link_jednostki w odczyt_zweryfikowany.json). Numer skanu
+   w uwagach bierze się sam z Tartaka (pocięte/skany.json); zakresy wycinków są potrzebne tylko bez niego. */
+function pokazLinkJednostki() {
+  const wejscie = el('input', { type: 'url', placeholder: 'https://skanoteka.genealodzy.pl/id5557-sy5500-kt10' });
+  wejscie.value = st.link || K.linkRocznika({ linki_skanow: st.linki }) || '';
+  const zakresy = tabelaZakresow();
+  const zTartaka = st.wycinki.filter((w) => st.skany && st.skany[w.wycinek]).length;
+  const zapisz = () => {
+    const v = wejscie.value.trim();
+    if (v && !/^https?:\/\//i.test(v)) return toast('Link musi zaczynać się od http:// albo https://');
+    const linki = zakresy.odczytaj();
+    if (!linki) return;
+    const jednostka = K.linkJednostki(v);
+    if (v && !jednostka) toast('To nie wygląda na link do jednostki w Skanotece (…/id…-sy…-kt…) – zapisuję, jak jest.');
+    st.link = jednostka || v;
+    st.linki = linki;
+    st.linkiZmieniono = Date.now();
+    zaplanujZapis();
+    odswiezLinkiSkanow();
+    odswiezWszystkieKarty();
+    zamknijOkno();
+    toast('Zapisano link do skanów.' + (linki.length ? ` Zakresów: ${linki.length}.` : ''));
+  };
+  wejscie.addEventListener('keydown', (e) => { if (e.key === 'Enter') zapisz(); });
+  let opisTartaka;
+  if (zTartaka && zTartaka === st.wycinki.length) {
+    opisTartaka = `Numer skanu w uwagach bierze się sam z Tartaka (wiadomo, z którego zdjęcia jest każdy z ${zTartaka} wycinków) – zakresy nie są potrzebne.`;
+  } else if (zTartaka) {
+    opisTartaka = `Tartak zapisał, z którego zdjęcia jest ${zTartaka} z ${st.wycinki.length} wycinków – dla reszty numer skanu weźmie się z zakresów poniżej.`;
+  } else {
+    opisTartaka = 'Tartak nie zapisał, z którego zdjęcia jest który wycinek – numer skanu w uwagach weźmie się z zakresów poniżej (jeśli je wpiszesz).';
+  }
+  okno('Link do skanów', [
+    el('p', { text: 'Wklej link do jednostki w Skanotece (rocznika). Trafi do kolumny „plik” w formacie Geneteki wszystkich aktów tego rocznika.' }),
+    wejscie,
+    el('p', { text: opisTartaka }),
+    el('details', { open: zTartaka < st.wycinki.length || st.linki.length > 0 },
+      el('summary', { text: 'Zakresy wycinków → link do strony księgi (nieobowiązkowe)' }),
+      el('p', { text: 'Np. wycinki 1–12 → link do zdjęcia strony 002 w Skanotece. Numer skanu bierze się z końcówki linku (plik=002.JPG).' }),
+      ...zakresy.wezly),
+  ], [el('button', { class: 'glowny', text: 'Zapisz', onclick: zapisz })], { trwale: true });
+  setTimeout(() => { wejscie.focus(); wejscie.select(); }, 50);
+}
+
+function odswiezLinkiSkanow() {
+  for (const k of $$('.karta')) {
+    const a = $('.link-skanu', k), url = linkSkanu(k.dataset.wycinek);
+    a.classList.toggle('ukryta', !url);
+    a.href = url || '#';
+  }
+}
+
+function pokazLinkiSkanow() {
+  if (GENETEKA) return pokazLinkJednostki();
+  const zakresy = tabelaZakresow();
+  okno('Linki do skanów', [
+    el('p', { text: 'Wpisz zakres wycinków i link do zdjęcia strony księgi, z której pochodzą (np. wycinki 1–12 → strona 2 '
+      + 'w Skanotece). Link pokaże się przy wycinku i trafi do kolumny „Skan” w pobieranym xlsx.' }),
+    ...zakresy.wezly,
   ], [
     el('button', { class: 'glowny', text: 'Zapisz', onclick: () => {
-      const linki = [];
-      for (const tr of $$('tr', tbody)) {
-        const od = parseInt(tr.pola.od.value, 10), doo = parseInt(tr.pola.doo.value, 10), url = tr.pola.url.value.trim();
-        if (!url && !tr.pola.od.value && !tr.pola.doo.value) continue;
-        if (!(od >= 1) || !(doo >= od)) return toast(`Zły zakres wycinków: ${tr.pola.od.value || '?'}–${tr.pola.doo.value || '?'}`);
-        if (!/^https?:\/\//i.test(url)) return toast(`Wiersz ${od}–${doo}: link musi zaczynać się od http:// albo https://`);
-        linki.push({ od, do: doo, url });
-      }
-      st.linki = linki.sort((a, b) => a.od - b.od);
+      const linki = zakresy.odczytaj();
+      if (!linki) return;
+      st.linki = linki;
+      st.linkiZmieniono = Date.now();
       zaplanujZapis();
       odswiezLinkiSkanow();
+      odswiezWszystkieKarty();
       zamknijOkno();
       const bez = st.wycinki.filter((w) => !linkSkanu(w.wycinek)).length;
       toast(`Zapisano linki do skanów (${linki.length}).` + (bez ? ` Bez linku: ${bez} wycinków.` : ''));
@@ -1346,8 +2045,21 @@ async function start() {
   POLA_KSIAG = { zgony: d.pola, urodzenia: d.pola_urodzenia || [] };
   TYPY = d.typy;
   RODZAJE = d.rodzaje;
+  try {
+    // format Geneteki: konwersja i zapis xlsx (te same pliki co w programie „genetyka weryfikacja”)
+    [K, XL] = await Promise.all([import('./konwersja.js'), import('./xlsx.js')]);
+    const r = await fetch('indeksy.xlsx');
+    if (!r.ok) throw new Error(`brak szablonu indeksy.xlsx (błąd ${r.status})`);
+    SZABLON = await r.arrayBuffer();
+    SLOWNIK = K.zbudujSlownik(await XL.czytajSlownikImion(window.JSZip, SZABLON));
+  } catch (e) {
+    K = XL = null;
+    toast('Nie udało się wczytać formatu Geneteki (' + e.message + ') – karty pokazują łacinę i polski jak dawniej.');
+  }
   ustawKsiege(null);
   try { st.otwarte = localStorage.getItem('zwiniete') !== '1'; } catch (e) { /* bez znaczenia */ }
+  try { st.pokazPuste = localStorage.getItem('pokazPuste') === '1'; } catch (e) { /* bez znaczenia */ }
+  $('#karty').classList.toggle('pokaz-puste', st.pokazPuste);
   $('#b-zwin').textContent = st.otwarte ? 'Zwiń wszystkie pola' : 'Rozwiń wszystkie pola';
 
   $('#karty').addEventListener('input', obsluzZmiane);
@@ -1362,6 +2074,20 @@ async function start() {
   $('#b-wyslij').addEventListener('click', wyslijNaStrone);
   $('#filtr').addEventListener('change', (e) => { st.filtr = e.target.value; zastosujFiltr(); });
   $('#b-linki').addEventListener('click', pokazLinkiSkanow);
+  $('#b-scal').addEventListener('click', scalLata);
+  // Enter = wycinek sprawdzony i następny (w polu wielowierszowym: Ctrl+Enter); jak w „genetyka weryfikacja”
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.metaKey || e.isComposing) return;
+    if (!$('#okno').classList.contains('ukryta') || !st.wycinki.length) return;
+    const pole = e.target instanceof Element ? e.target.closest('input, textarea, select, button, a, summary, [contenteditable]') : null;
+    if (pole && !e.ctrlKey && ['TEXTAREA', 'BUTTON', 'A', 'SUMMARY'].includes(pole.tagName)) return;
+    if (pole && !pole.closest('.karta')) return;
+    const karta = (pole && pole.closest('.karta')) || biezacaKarta();
+    if (!karta || !karta.ustawSprawdzony) return;
+    e.preventDefault();
+    if (pole) pole.blur();
+    karta.ustawSprawdzony(true, true);
+  });
   $('#b-zwin').addEventListener('click', () => {
     st.otwarte = !st.otwarte;
     try { localStorage.setItem('zwiniete', st.otwarte ? '0' : '1'); } catch (e) { /* bez znaczenia */ }

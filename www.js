@@ -1,9 +1,11 @@
 'use strict';
-/* Strona www dla pomocnika (GitHub Pages): logowanie, odszyfrowanie danych i zapis poprawek na GitHubie.
+/* Strona www (GitHub Pages): logowanie, odszyfrowanie danych i zapis poprawek na GitHubie.
    Udaje serwer weryfikacja.pyw (te same adresy /api/...), więc app.js działa tak samo jak na komputerze.
+   Z tego samego pliku korzysta Weryfikacja Geneteka na stronie (folder geneteka/, window.WWW.dane).
    Dane w repo są zaszyfrowane (AES-GCM) kluczem z loginu i hasła - hasła nie ma w kodzie strony.
-   Poprawki idą do gałęzi "poprawki" (d/w<id>, jeden plik na rocznik), skąd weryfikacja.pyw wczytuje je
-   do odczyt_zweryfikowany.json. Do zapisu potrzebny jest token GitHuba (zaszyfrowany w d/1). */
+   Poprawki idą do gałęzi "poprawki", jeden plik na rocznik i rodzaj: d/w<id> (odczyt_zweryfikowany - Weryfikacja),
+   d/g<id> (genetyka_poprawki - Weryfikacja Geneteka), d/x<id> (ostatni xlsx Geneteki), skąd weryfikacja.pyw
+   przenosi je do folderów roczników. Do zapisu potrzebny jest token GitHuba (zaszyfrowany w d/1). */
 
 window.WWW = (() => {
   const REPO = 'wrobelkarol/weryfikacja';
@@ -12,11 +14,15 @@ window.WWW = (() => {
   const ITERACJE = 250000;
   const CO_ILE_WYSYLAC = 20000;                        // ms między zapisami na GitHubie (każdy zapis to commit)
   const LS_KLUCZ = 'weryfikacja.klucz', LS_ZALEGLE = 'weryfikacja.zalegle';
+  // token wklejony na stronie (przycisk „Wklej token”) – zaszyfrowany kluczem z loginu, tylko w tej przeglądarce
+  const LS_TOKEN = 'weryfikacja.token';
   const GH = `https://api.github.com/repos/${REPO}/contents/`;
+  // strona Weryfikacji Geneteka leży w podfolderze – dane (d/...) są piętro wyżej
+  const BAZA = window.WWW_BAZA || '';
 
   let klucz = null, token = null, spis = null, spisPobrany = 0;
   const sha = new Map();          // plik poprawek -> sha na GitHubie (bez niego GitHub nie pozwoli nadpisać)
-  const zalegle = new Map();      // rocznik -> { plik, dane }: zapisane w przeglądarce, jeszcze nie na GitHubie
+  const zalegle = new Map();      // plik poprawek -> { plik, dane, rodzaj }: zapisane w przeglądarce, jeszcze nie na GitHubie
   const adresyObrazow = [];
   let wysylanie = false, ostatniaWysylka = 0, timerWysylki = null;
 
@@ -81,7 +87,7 @@ window.WWW = (() => {
   }
 
   async function zPages(sciezka, swiezy) {
-    const r = await fetch(sciezka, { cache: swiezy ? 'no-cache' : 'default' });
+    const r = await fetch(BAZA + sciezka, { cache: swiezy ? 'no-cache' : 'default' });
     if (r.status === 404) return null;
     if (!r.ok) throw new Error(`błąd ${r.status} przy pobieraniu danych`);
     return r.arrayBuffer();
@@ -102,6 +108,7 @@ window.WWW = (() => {
   }
 
   async function poprawki(nazwa) {       // plik poprawek z gałęzi "poprawki"; zapamiętuje jego sha
+    if (!nazwa) return null;
     if (!token) {
       const r = await fetch(`https://raw.githubusercontent.com/${REPO}/${GALAZ_POPRAWEK}/d/${nazwa}`, { cache: 'no-cache' });
       return r.ok ? rozpakuj(await r.arrayBuffer()) : null;
@@ -117,21 +124,55 @@ window.WWW = (() => {
     return rozpakuj(d.content ? zB64(d.content) : await zApi('d/' + nazwa, GALAZ_POPRAWEK));
   }
 
-  /* odczyt_zweryfikowany z kilku miejsc: z każdego wycinka zostaje wersja poprawiona najpóźniej */
+  /* Plik poprawek: wersja z GitHuba połączona z tym, co czeka w tej przeglądarce na wysłanie. */
+  async function aktualne(nazwa, rodzaj) {
+    const czekajace = zalegle.get(nazwa);
+    return SCAL[rodzaj](await poprawki(nazwa), czekajace && czekajace.dane);
+  }
+
+  /* odczyt_zweryfikowany z kilku miejsc: z każdego wycinka zostaje wersja poprawiona najpóźniej;
+     linki do skanów - z zapisu, w którym zmieniono je najpóźniej */
   function scal(...zapisy) {
     const wycinki = new Map();
-    let wynik = null;
+    let wynik = null, linki = null;
     for (const z of zapisy) {
       if (!z) continue;
       wynik = { ...z };
+      if (!linki || (+z.linki_zmieniono || 0) >= (+linki.linki_zmieniono || 0)) linki = z;
       for (const w of z.wycinki || []) {
         const k = String(w.wycinek), byl = wycinki.get(k);
         if (!byl || (+w.zmieniono || 0) >= (+byl.zmieniono || 0)) wycinki.set(k, w);
       }
     }
-    if (wynik) wynik.wycinki = [...wycinki.values()];
+    if (wynik) {
+      wynik.wycinki = [...wycinki.values()];
+      for (const k of ['linki_skanow', 'link_jednostki', 'linki_zmieniono']) {
+        if (linki[k] === undefined) delete wynik[k]; else wynik[k] = linki[k];
+      }
+    }
     return wynik;
   }
+
+  /* genetyka_poprawki z kilku miejsc: z każdego aktu wersja zmieniona najpóźniej, reszta z najnowszego zapisu */
+  function scalGeneteki(...zapisy) {
+    const czas = (a) => [a && a.zmieniono, a && a.sprawdzony].filter((t) => typeof t === 'string').sort().pop() || '';
+    let wynik = null;
+    const akty = {};
+    for (const z of zapisy) {
+      if (!z) continue;
+      if (!wynik || String(z.zapisano || '') >= String(wynik.zapisano || '')) wynik = { ...z };
+      for (const [k, a] of Object.entries(z.akty || {})) if (!akty[k] || czas(a) >= czas(akty[k])) akty[k] = a;
+    }
+    if (wynik) wynik.akty = akty;
+    return wynik;
+  }
+
+  /* xlsx Geneteki: zostaje ostatnio zapisany */
+  function nowszy(...zapisy) {
+    return zapisy.filter(Boolean).sort((a, b) => (+a.zapisano || 0) - (+b.zapisano || 0)).pop() || null;
+  }
+
+  const SCAL = { w: scal, g: scalGeneteki, x: nowszy };
 
   // ---------------------------------------------------------------- adresy /api/... jak w weryfikacja.pyw
 
@@ -142,37 +183,103 @@ window.WWW = (() => {
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
   }
 
+  async function odswiezSpis() {
+    if (Date.now() - spisPobrany > 5000) {
+      spis = (await json('0')) || spis;
+      spisPobrany = Date.now();
+    }
+    return spis;
+  }
+
   async function get(url) {
     const [adres, zapytanie] = url.split('?');
+    const q = new URLSearchParams(zapytanie);
     if (adres === '/api/start') return { korzen: '', pola: spis.pola, pola_urodzenia: spis.pola_urodzenia, typy: spis.typy, rodzaje: spis.rodzaje };
-    if (adres === '/api/drzewo') {
-      if (Date.now() - spisPobrany > 5000) {
-        spis = (await json('0')) || spis;
-        spisPobrany = Date.now();
-      }
-      return spis.drzewo;
-    }
-    if (adres === '/api/folder') return folder(new URLSearchParams(zapytanie).get('sciezka'));
+    if (adres === '/api/drzewo') return (await odswiezSpis()).drzewo;
+    if (adres === '/api/folder') return folder(q.get('sciezka'));
+    if (adres === '/api/geneteka_lata') return lataGeneteki(q.get('sciezka'));
     throw new Error('tego nie ma na stronie www');
   }
 
   async function post(url, cialo) {
     if (url === '/api/zapisz') return zapisz(cialo);
+    if (url === '/api/xlsx_geneteki') return xlsxGeneteki(cialo);
+    if (url === '/api/xlsx_scalone') {
+      pobierzPlik(cialo.nazwa, zB64(cialo.xlsx));
+      return odpowiedz({ folder: 'pobrane pliki', komunikat: `Pobrano ${cialo.nazwa} (folder „Pobrane” w przeglądarce).` });
+    }
     throw new Error('tego nie ma na stronie www');
+  }
+
+  /** Plik binarny (np. /api/plik_xlsx?sciezka=…) – odpowiednik fetch na komputerze. */
+  async function binarny(url) {
+    const [adres, zapytanie] = url.split('?');
+    if (adres !== '/api/plik_xlsx') throw new Error('tego nie ma na stronie www');
+    const sciezka = new URLSearchParams(zapytanie).get('sciezka');
+    const i = sciezka.lastIndexOf('/');
+    const dane = await xlsxRocznika(sciezka.slice(0, i), sciezka.slice(i + 1));
+    if (!dane) throw new Error('nie ma pliku ' + sciezka.slice(i + 1));
+    return dane;
   }
 
   async function folder(rocznik) {
     const r = spis.roczniki[rocznik];
     if (!r) throw new Error('tego rocznika nie ma na stronie');
-    const [ai, lokalny, www] = await Promise.all([json(r.ai), json(r.zw), poprawki(r.www)]);
-    const czekajace = zalegle.get(rocznik);
+    const [ai, lokalny, www, skany] = await Promise.all([json(r.ai), json(r.zw), aktualne(r.www, 'w'), json(r.skany)]);
     adresyObrazow.splice(0).forEach((u) => URL.revokeObjectURL(u));
     return {
       sciezka: rocznik, opis: r.opis,
       wycinki: r.wycinki.map(({ plik: p, wycinek, zmieniony }) => ({ plik: p, wycinek, zmieniony })),
       ai, ai_blad: null, ai_zmieniony: r.ai_zmieniony,
-      zweryfikowany: scal(lokalny, www, czekajace && czekajace.dane),
+      zweryfikowany: scal(lokalny, www),
+      skany: skany && skany.wycinki,
+      geneteka_poprawki: !!r.gp,
     };
+  }
+
+  /** odczyt_zweryfikowany rocznika: z komputera + poprawki ze strony + czekające w przeglądarce. */
+  async function zweryfikowany(rel) {
+    const r = spis.roczniki[rel];
+    const [lokalny, www] = await Promise.all([json(r.zw), aktualne(r.www, 'w')]);
+    return scal(lokalny, www);
+  }
+
+  /** Ostatni xlsx Geneteki rocznika (zapisany na stronie albo wysłany z komputera) o tej nazwie. */
+  async function xlsxRocznika(rel, nazwa) {
+    const r = spis.roczniki[rel];
+    if (!r) return null;
+    const x = await aktualne(r.xl, 'x');
+    const zKomputera = r.xlsx && (!nazwa || r.xlsx.nazwa === nazwa) ? r.xlsx : null;
+    if (x && (!nazwa || x.nazwa === nazwa) && (!zKomputera || +x.zapisano >= +zKomputera.zapisano)) return zB64(x.xlsx);
+    return zKomputera ? odszyfruj(await plik(zKomputera.id, true)) : null;
+  }
+
+  /** genetyka_poprawki rocznika: z komputera + ze strony + czekające w przeglądarce. */
+  async function genetykaRocznika(rel) {
+    const r = spis.roczniki[rel];
+    return scalGeneteki(await json(r.gp), await aktualne(r.gen, 'g'));
+  }
+
+  async function nazwaXlsxRocznika(rel) {
+    const r = spis.roczniki[rel];
+    const x = await aktualne(r.xl, 'x');
+    return (x && x.nazwa) || (r.xlsx && r.xlsx.nazwa) || null;
+  }
+
+  async function lataGeneteki(rel) {
+    const r0 = spis.roczniki[rel];
+    const { parafia, ksiega } = r0.opis;
+    const lata = [];
+    for (const [k, r] of Object.entries(spis.roczniki)) {
+      if (r.opis.parafia !== parafia || r.opis.ksiega !== ksiega || !/^\d{4}$/.test(String(r.opis.rok))) continue;
+      const d = (await zweryfikowany(k)) || {};
+      const akty = (d.wycinki || []).filter((w) => (w.rodzaj || 'akt') === 'akt');
+      const nazwa = await nazwaXlsxRocznika(k);
+      lata.push({ rok: +r.opis.rok, sciezka: k, akty: akty.length, sprawdzone: akty.filter((w) => w.sprawdzony).length,
+        pliki: nazwa ? [nazwa] : [], pobrano: d.pobrano || null, zmiany_po_pobraniu: !!d.zmiany_po_pobraniu });
+    }
+    lata.sort((a, b) => a.rok - b.rok);
+    return { folder: `${parafia}/${ksiega}`, parafia, ksiega, lata };
   }
 
   // ---------------------------------------------------------------- zapis poprawek
@@ -193,22 +300,44 @@ window.WWW = (() => {
 
   function wczytajZalegle() {
     try {
-      for (const [k, v] of JSON.parse(localStorage.getItem(LS_ZALEGLE) || '[]')) zalegle.set(k, v);
+      // starsze zapisy: klucz = rocznik, bez rodzaju (zawsze odczyt_zweryfikowany)
+      for (const [, v] of JSON.parse(localStorage.getItem(LS_ZALEGLE) || '[]')) zalegle.set(v.plik, { rodzaj: 'w', ...v });
     } catch (e) { /* bez znaczenia */ }
+  }
+
+  /** Zapis pliku poprawek: od razu w przeglądarce, na GitHuba w kolejce (co CO_ILE_WYSYLAC). */
+  function kolejkuj(nazwa, dane, rodzaj) {
+    const byl = zalegle.get(nazwa);
+    zalegle.set(nazwa, { plik: nazwa, rodzaj, dane: byl && rodzaj !== 'x' ? SCAL[rodzaj](byl.dane, dane) : dane });
+    zapamietajZalegle();
+    const zapisano = teraz();
+    if (!token) {
+      return { zapisano, ostrzezenie: true,
+        komunikat: 'Zapisano tylko w tej przeglądarce – strona nie ma tokenu (kliknij „Wklej token”), poprawki czekają na wysłanie.' };
+    }
+    zaplanujWysylke(document.visibilityState === 'hidden');
+    return { zapisano, komunikat: `Zapisano ${zapisano.slice(11)}, wysyłanie…` };
   }
 
   function zapisz(cialo) {
     const r = spis.roczniki[cialo.sciezka];
     if (!r) throw new Error('tego rocznika nie ma na stronie');
-    zalegle.set(cialo.sciezka, { plik: r.www, dane: cialo.dane });
-    zapamietajZalegle();
-    const zapisano = teraz();
-    if (!token) {
-      return odpowiedz({ zapisano, pobrano: null, ostrzezenie: true,
-        komunikat: 'Zapisano tylko w tej przeglądarce – strona nie ma tokenu, poprawki nie idą na GitHuba.' });
-    }
-    zaplanujWysylke(document.visibilityState === 'hidden');
-    return odpowiedz({ zapisano, pobrano: null, komunikat: `Zapisano ${zapisano.slice(11)}, wysyłanie…` });
+    const d = cialo.dane || {};
+    return odpowiedz({ pobrano: d.pobrano || null, zmiany_po_pobraniu: d.zmiany_po_pobraniu, ...kolejkuj(r.www, d, 'w') });
+  }
+
+  /* „Pobierz xlsx genetyka” na stronie: plik pobiera przeglądarka, a na GitHubie zostaje jego kopia
+     (weryfikacja.pyw wstawi ją do folderu rocznika). */
+  function xlsxGeneteki(cialo) {
+    const r = spis.roczniki[cialo.sciezka];
+    if (!r) throw new Error('tego rocznika nie ma na stronie');
+    const t = teraz();
+    Object.assign(cialo.dane, { pobrano: t, xlsx_geneteki: t, zmiany_po_pobraniu: false });
+    kolejkuj(r.www, cialo.dane, 'w');
+    const wynik = kolejkuj(r.xl, { nazwa: cialo.nazwa, zapisano: Date.now(), zrodlo: 'weryfikacja', xlsx: cialo.xlsx }, 'x');
+    pobierzPlik(cialo.nazwa, zB64(cialo.xlsx));
+    return odpowiedz({ folder: 'pobrane pliki', zapisano: t,
+      komunikat: `Pobrano ${cialo.nazwa}.` + (token ? ' Kopia trafi do folderu rocznika, gdy uruchomisz Weryfikację na komputerze.' : ` ${wynik.komunikat}`) });
   }
 
   function zaplanujWysylke(odRazu = false) {
@@ -221,9 +350,9 @@ window.WWW = (() => {
     if (wysylanie || !zalegle.size || !token) return;
     wysylanie = true;
     try {
-      for (const [rocznik, z] of [...zalegle]) {
+      for (const [nazwa, z] of [...zalegle]) {
         await wyslijPlik(z, keepalive);
-        if (zalegle.get(rocznik) === z) zalegle.delete(rocznik);   // w trakcie wysyłania mogły dojść nowe poprawki
+        if (zalegle.get(nazwa) === z) zalegle.delete(nazwa);   // w trakcie wysyłania mogły dojść nowe poprawki
       }
       zapamietajZalegle();
       if (!zalegle.size) stan('Zapisano i wysłano ' + teraz().slice(11));
@@ -240,8 +369,8 @@ window.WWW = (() => {
     let dane = z.dane;
     for (let proba = 0; proba < 3; proba++) {
       if (!sha.has(z.plik) || proba) {
-        // ktoś (np. druga karta) zapisał w międzyczasie - jego poprawki zostają, z każdego wycinka nowsza wersja
-        dane = scal(await poprawki(z.plik), dane);
+        // ktoś (np. druga karta albo drugi komputer) zapisał w międzyczasie - jego poprawki zostają
+        dane = SCAL[z.rodzaj || 'w'](await poprawki(z.plik), dane);
       }
       const tresc = doB64(await spakuj(dane));
       const s = sha.get(z.plik);
@@ -271,6 +400,16 @@ window.WWW = (() => {
     }
   });
 
+  /** Plik do pobrania przez przeglądarkę (xlsx). */
+  function pobierzPlik(nazwa, dane) {
+    const url = URL.createObjectURL(new Blob([dane], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: nazwa });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 20000);
+  }
+
   // ---------------------------------------------------------------- wycinki (obrazy)
 
   const obserwator = new IntersectionObserver((wpisy) => {
@@ -287,17 +426,23 @@ window.WWW = (() => {
     obserwator.observe(img);
   }
 
+  /** Adres (blob:) odszyfrowanego wycinka. */
+  async function adresWycinka(rocznik, nazwaPliku) {
+    const r = spis.roczniki[rocznik];
+    const w = r && r.wycinki.find((x) => x.plik === nazwaPliku);
+    if (!w) return '';
+    const dane = await plik(w.id, false);
+    if (!dane) throw new Error('jeszcze się wysyła, odśwież stronę za minutę');
+    const typ = { png: 'image/png', gif: 'image/gif', webp: 'image/webp' }[w.plik.split('.').pop().toLowerCase()] || 'image/jpeg';
+    const url = URL.createObjectURL(new Blob([await odszyfruj(dane)], { type: typ }));
+    adresyObrazow.push(url);
+    return url;
+  }
+
   async function zaladujObraz(img) {
-    const r = spis.roczniki[img.dataset.rocznik];
-    const w = r && r.wycinki.find((x) => x.plik === img.dataset.plik);
-    if (!w) return;
     try {
-      const dane = await plik(w.id, false);
-      if (!dane) throw new Error('jeszcze się wysyła, odśwież stronę za minutę');
-      const typ = { png: 'image/png', gif: 'image/gif', webp: 'image/webp' }[w.plik.split('.').pop().toLowerCase()] || 'image/jpeg';
-      const url = URL.createObjectURL(new Blob([await odszyfruj(dane)], { type: typ }));
-      adresyObrazow.push(url);
-      img.src = url;
+      const url = await adresWycinka(img.dataset.rocznik, img.dataset.plik);
+      if (url) img.src = url;
     } catch (e) {
       img.alt = 'Nie udało się wczytać wycinka: ' + e.message;
     }
@@ -307,7 +452,8 @@ window.WWW = (() => {
 
   async function wczytajStart() {
     const t = await zPages('d/1', true);
-    token = t ? new TextDecoder().decode(await odszyfruj(t)) : null;     // zły login albo hasło -> OperationError
+    const zeStrony = t ? new TextDecoder().decode(await odszyfruj(t)) : null;     // zły login albo hasło -> OperationError
+    token = (await tokenZPrzegladarki()) || zeStrony;           // wklejony tutaj ma pierwszeństwo
     spis = await json('0');
     if (!spis) throw new Error('Na stronie nie ma jeszcze danych.');
     spisPobrany = Date.now();
@@ -318,7 +464,7 @@ window.WWW = (() => {
       const okno = document.createElement('div');
       okno.className = 'logowanie';
       okno.innerHTML = `<form>
-        <h1>Weryfikacja odczytów</h1>
+        <h1>${document.title || 'Weryfikacja odczytów'}</h1>
         <label>Login<input name="login" autocomplete="username" required></label>
         <label>Hasło<input name="haslo" type="password" autocomplete="current-password" required></label>
         <p class="blad"></p>
@@ -347,6 +493,72 @@ window.WWW = (() => {
     });
   }
 
+  // ---------------------------------------------------------------- token wklejony na stronie
+
+  async function tokenZPrzegladarki() {
+    try {
+      const z = localStorage.getItem(LS_TOKEN);
+      return z ? new TextDecoder().decode(await odszyfruj(zB64(z))) : null;
+    } catch (e) {
+      return null;           // inny login albo uszkodzony wpis
+    }
+  }
+
+  /** Czy GitHub przyjmuje token do zapisu poprawek (gałąź „poprawki”). */
+  async function sprawdzToken(t) {
+    const r = await fetch(`${GH}.gitkeep?ref=${GALAZ_POPRAWEK}`, { cache: 'no-store',
+      headers: { Authorization: `Bearer ${t}`, Accept: 'application/vnd.github+json' } });
+    if (r.status === 401 || r.status === 403) throw new Error('GitHub nie przyjął tego tokenu – sprawdź, czy skopiowałeś go w całości i czy ma dostęp do repozytorium „weryfikacja”.');
+    if (!r.ok && r.status !== 404) throw new Error(`GitHub: błąd ${r.status}`);
+  }
+
+  function pokazPrzyciskTokenu() {
+    const b = document.getElementById('b-token');
+    if (!b) return;
+    b.classList.remove('ukryta');
+    b.textContent = token ? 'Token ✓' : 'Wklej token';
+    b.title = token ? 'Strona zapisuje poprawki na GitHubie. Kliknij, żeby wkleić inny token.'
+      : 'Strona nie ma tokenu – poprawki zostają w tej przeglądarce. Wklej token GitHuba, żeby szły na GitHuba.';
+    b.classList.toggle('glowny', !token);
+  }
+
+  function oknoTokenu() {
+    const okno = document.createElement('div');
+    okno.className = 'logowanie';
+    okno.innerHTML = `<form>
+      <h1>Token GitHuba</h1>
+      <p style="margin:0;font-size:13px">Token (zaczyna się od github_pat_) pozwala stronie zapisywać poprawki na GitHubie.
+        Zostanie zapisany tylko w tej przeglądarce, zaszyfrowany.</p>
+      <label>Token<input name="token" type="password" autocomplete="off" required></label>
+      <p class="blad"></p>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" data-anuluj>Anuluj</button>
+        <button class="glowny" type="submit">Zapisz</button>
+      </div>
+    </form>`;
+    document.body.append(okno);
+    const f = okno.querySelector('form'), komunikat = f.querySelector('.blad');
+    f.elements.token.focus();
+    okno.querySelector('[data-anuluj]').addEventListener('click', () => okno.remove());
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const t = f.elements.token.value.trim();
+      komunikat.textContent = 'Sprawdzam…';
+      try {
+        await sprawdzToken(t);
+        localStorage.setItem(LS_TOKEN, doB64(await zaszyfruj(new TextEncoder().encode(t))));
+        token = t;
+        sha.clear();
+        okno.remove();
+        pokazPrzyciskTokenu();
+        stan(zalegle.size ? 'Token zapisany – wysyłam poprawki czekające w przeglądarce…' : 'Token zapisany – poprawki będą szły na GitHuba.');
+        if (zalegle.size) zaplanujWysylke(true);
+      } catch (err) {
+        komunikat.textContent = err.message;
+      }
+    });
+  }
+
   function wyloguj() {
     if (zalegle.size && !confirm('Część poprawek nie jest jeszcze wysłana. Wylogować mimo to?')) return;
     try { localStorage.removeItem(LS_KLUCZ); } catch (e) { /* bez znaczenia */ }
@@ -369,8 +581,17 @@ window.WWW = (() => {
       }
     }
     if (!klucz) await formularz(blad);
+    const bt = document.getElementById('b-token');
+    if (bt) bt.addEventListener('click', oknoTokenu);
+    pokazPrzyciskTokenu();
     if (zalegle.size) zaplanujWysylke(true);
   }
 
-  return { zaloguj, get, post, obraz };
+  // dla strony Weryfikacji Geneteka (geneteka/dysk.js: DyskGitHub)
+  const dane = {
+    spis: () => spis, odswiezSpis, json, aktualne, zweryfikowany, genetykaRocznika, xlsxRocznika, nazwaXlsxRocznika, kolejkuj,
+    adresWycinka, pobierzPlik, zB64, doB64, maToken: () => !!token, teraz,
+  };
+
+  return { zaloguj, get, post, binarny, obraz, wyloguj, dane };
 })();

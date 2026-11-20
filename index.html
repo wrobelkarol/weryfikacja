@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Weryfikacja odczytów</title>
 <meta name="robots" content="noindex, nofollow">
-<link rel="stylesheet" href="styl.css?v=1793131551">
+<link rel="stylesheet" href="styl.css?v=1795160634">
 </head>
 <body class="www">
 <header>
@@ -15,7 +15,9 @@
   <div class="pasek" title="Sprawdzone wycinki"><div id="pasek"></div></div>
   <span id="stan-zapisu" class="stan-zapisu"></span>
   <div class="przyciski">
-    <button id="b-pobierz" class="glowny tylko-lokalnie" disabled title="Pobierz plik xlsx z arkuszami Łacina i Polski">Pobierz xlsx</button>
+    <button id="b-pobierz" class="glowny" disabled title="Zapisz plik xlsx dla Geneteki w folderze rocznika">Pobierz xlsx genetyka</button>
+    <a class="przycisk tylko-www" href="geneteka/" title="Roczniki zrobione starym sposobem: format Geneteki">Weryfikacja Geneteka →</a>
+    <button id="b-token" class="tylko-www ukryta">Wklej token</button>
     <button id="b-wyloguj" class="tylko-www" title="Wyloguj z tej przeglądarki">Wyloguj</button>
   </div>
 </header>
@@ -27,6 +29,7 @@
       <button id="b-prompt" class="tylko-lokalnie" title="Prompt do wklejenia w Antigravity (z uzupełnioną ścieżką)">Prompt dla AI</button>
       <button id="b-odswiez" title="Odśwież drzewo i bieżący folder (np. gdy AI skończyło)">Odśwież</button>
       <button id="b-wyslij" class="tylko-lokalnie" title="Wyślij pocięte wycinki, odczyty AI i poprawki na stronę www dla pomocnika">Wyślij na stronę</button>
+      <button id="b-scal" disabled title="Połącz zapisane xlsx Geneteki kilku roczników w jeden plik (rocznik pod rocznikiem)">Scal lata</button>
     </div>
     <div id="drzewo" class="drzewo"></div>
     <ul class="legenda">
@@ -51,7 +54,7 @@
         </select>
       </label>
       <button id="b-zwin">Zwiń wszystkie pola</button>
-      <button id="b-linki" class="tylko-lokalnie" title="Zakresy wycinków i linki do zdjęć stron księgi (kolumna „Skan” w xlsx)">Linki do skanów</button>
+      <button id="b-linki" title="Zakresy wycinków i linki do zdjęć stron księgi (kolumna „Skan” w xlsx)">Linki do skanów</button>
       <span class="podpowiedz"><span class="probka podejrzane"></span> coś się nie zgadza (najedź myszką na pole)
         <span class="probka niepewne"></span> AI nie było pewne odczytu
         <span class="ptaszek widoczny">✓</span> pole poprawione (najedź, żeby zobaczyć odczyt AI)</span>
@@ -59,15 +62,17 @@
     <div id="karty"></div>
     <div id="pusto" class="pusto">
       <h2>Wybierz rocznik w drzewie po lewej</h2>
-      <p class="tylko-www">Pod każdym wycinkiem skanu są pola odczytane przez AI – po łacinie i po polsku. Porównaj je
-        z wycinkiem (kliknięcie powiększa), popraw, co się nie zgadza, i kliknij <b>Oznacz jako sprawdzone</b>.
+      <p class="tylko-www">Pod każdym wycinkiem skanu są pola odczytane przez AI – łacina, a pod nią akt w formacie Geneteki.
+        Porównaj je z wycinkiem (kliknięcie powiększa), popraw, co się nie zgadza, i naciśnij <b>Enter</b> (sprawdzone, następny).
         Pola z pomarańczową ramką mogą być błędne (najedź na nie myszką), żółte – AI nie było pewne odczytu.
         Poprawki zapisują się same.</p>
       <ol class="tylko-lokalnie">
         <li>Potnij skany rocznika w Tartaku (powstaje folder <b>pocięte</b>).</li>
         <li>Kliknij rocznik po lewej, potem <b>Prompt dla AI</b> – skopiuj i wklej w Antigravity.</li>
-        <li>Gdy AI skończy, kliknij <b>Odśwież</b>. Pod każdym wycinkiem zobaczysz pola po łacinie i po polsku.</li>
-        <li>Popraw, co trzeba (zapisuje się samo), i kliknij <b>Pobierz xlsx</b>.</li>
+        <li>Gdy AI skończy, kliknij <b>Odśwież</b>. Pod każdym wycinkiem zobaczysz łacinę, a pod nią akt w formacie Geneteki.</li>
+        <li>Popraw, co trzeba (zapisuje się samo), i naciśnij <b>Enter</b> – wycinek jest sprawdzony i pokazuje się następny.</li>
+        <li>Na koniec kliknij <b>Pobierz xlsx genetyka</b> – plik dla Geneteki zapisze się w folderze rocznika.
+          <b>Scal lata</b> łączy kilka roczników w jeden plik.</li>
       </ol>
     </div>
   </main>
@@ -81,7 +86,8 @@
   </div>
 </div>
 <div id="toast" class="toast ukryta"></div>
-<script src="www.js?v=1793131551"></script>
-<script src="app.js?v=1793131551"></script>
+<script src="jszip.min.js"></script>
+<script src="www.js?v=1795160634"></script>
+<script src="app.js?v=1795160634"></script>
 </body>
 </html>

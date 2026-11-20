@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Weryfikacja Geneteka</title>
+<link rel="icon" href="ikona.png">
+<link rel="stylesheet" href="styl.css">
+</head>
+<body>
+<header>
+  <h1>Weryfikacja Geneteka</h1>
+  <label class="wybor-rocznika">Rocznik
+    <select id="rocznik" disabled><option>wczytywanie…</option></select>
+  </label>
+  <span id="licznik" class="licznik"></span>
+  <div class="pasek" title="Sprawdzone akty"><div id="pasek"></div></div>
+  <span id="stan-zapisu" class="stan-zapisu" role="status"></span>
+  <div class="przyciski">
+    <button id="b-token" class="ukryta">Wklej token</button>
+    <a id="b-weryfikacja" class="przycisk ukryta" href="../" title="Strona Weryfikacji (łacina i format Geneteki dla nowych roczników)">← Weryfikacja</a>
+    <button id="b-xlsx" class="glowny" disabled title="Zapisz plik xlsx dla Geneteki w folderze sprawdzanego rocznika">Pobierz xlsx genetyka</button>
+  </div>
+</header>
+
+<div class="uklad">
+  <aside id="boczny">
+    <div class="boczne-przyciski">
+      <button id="b-scal" disabled title="Połącz sprawdzone roczniki w jeden plik (rocznik pod rocznikiem)">Scal lata</button>
+      <button id="b-odswiez" disabled title="Wczytaj ponownie dane z Weryfikacji">Odśwież</button>
+      <button id="b-folder" class="ukryta" title="Wskaż inny folder ze skanami (ma być „SKANY MAM DOŚĆ”)">Zmień folder…</button>
+    </div>
+    <label class="link-rocznika">Link do jednostki w Skanotece
+      <span class="z-ptaszkiem"><input id="link-rocznika" type="url" placeholder="https://skanoteka.genealodzy.pl/id5557-sy5500-kt1" disabled>
+        <span id="ptaszek-linku" class="ptaszek" title="">✓</span></span>
+    </label>
+    <ul id="lista-aktow" class="lista-aktow" aria-label="Akty rocznika"></ul>
+    <ul class="legenda">
+      <li><span class="ikona stan-sprawdzony">✓</span> sprawdzony</li>
+      <li><span class="ikona stan-flagi">●</span> do sprawdzenia</li>
+      <li><span class="ikona stan-nowy">○</span> jeszcze nie sprawdzony</li>
+      <li><span class="ikona zmieniony">✎</span> zmieniony ręcznie</li>
+    </ul>
+  </aside>
+
+  <main id="tresc">
+    <div id="komunikaty"></div>
+
+    <div id="widok" class="ukryta">
+      <section class="sekcja">
+        <h2>Wycinek <span id="tytul-aktu"></span> <span class="opis" id="opis-aktu"></span></h2>
+        <div class="obraz" id="obraz" title="Kliknij, żeby powiększyć"><img id="obraz-img" alt="Wycinek aktu"></div>
+      </section>
+
+      <section class="sekcja">
+        <h2>Z Weryfikacji <span class="opis">(odczyt po polsku, tylko do podglądu)</span></h2>
+        <div id="pola-weryfikacji" class="siatka"></div>
+        <div id="dlugie-weryfikacji" class="dlugie"></div>
+      </section>
+
+      <section class="sekcja" id="sekcja-geneteki">
+        <h2>Format Geneteki
+          <span class="prawo">
+            <button id="b-duplikuj" title="Dodaj drugi wiersz z tym samym numerem aktu (np. bliźnięta w jednym akcie)">Duplikuj wiersz (bliźnięta)</button>
+          </span>
+        </h2>
+        <p class="podpowiedz"><span class="probka do-sprawdzenia"></span> do sprawdzenia (najedź na pole)
+          <span class="ptaszek widoczny">✓</span> zmieniono ręcznie (kliknij ✓, żeby przywrócić wartość automatyczną)</p>
+        <div id="wiersze-geneteki"></div>
+      </section>
+
+      <nav class="nawigacja" aria-label="Przełączanie aktów">
+        <button id="b-poprzedni" title="Poprzedni akt (Alt+←)">← Poprzedni skan</button>
+        <button id="b-sprawdzone" class="b-sprawdzone" title="Oznacz jako sprawdzony i przejdź dalej (Enter)">Sprawdzone ✓ <kbd>Enter</kbd></button>
+        <button id="b-nastepny" title="Następny akt (Alt+→)">Następny skan →</button>
+      </nav>
+    </div>
+
+    <div id="start" class="pusto">
+      <h2>Sprawdzanie rocznika w formacie Geneteki</h2>
+      <ol>
+        <li>Wybierz rocznik u góry (są tu tylko roczniki, dla których w Weryfikacji pobrano już xlsx).</li>
+        <li>Porównaj wycinek z polami w formacie Geneteki, popraw, co trzeba (zapisuje się samo),
+          i naciśnij <b>Enter</b> – akt jest oznaczony jako sprawdzony i pokazuje się następny.</li>
+        <li>Na koniec kliknij <b>Pobierz xlsx genetyka</b> – plik zapisze się w folderze rocznika.</li>
+        <li><b>Scal lata</b> łączy sprawdzone roczniki w jeden plik dla Geneteki.</li>
+      </ol>
+      <div id="polaczenie"></div>
+    </div>
+  </main>
+</div>
+
+<div id="okno" class="okno ukryta" role="dialog" aria-modal="true" aria-labelledby="okno-tytul">
+  <div class="okno-tresc">
+    <h2 id="okno-tytul"></h2>
+    <div id="okno-cialo"></div>
+    <div class="okno-przyciski" id="okno-przyciski"></div>
+  </div>
+</div>
+<div id="toast" class="toast ukryta" role="status"></div>
+<script>window.WWW_BAZA = '../';</script>
+<script src="../www.js?v=1795160634"></script>
+<script src="lib/jszip.min.js"></script>
+<script type="module" src="app.js?v=1795160634"></script>
+</body>
+</html>

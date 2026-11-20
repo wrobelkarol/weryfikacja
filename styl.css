@@ -1,19 +1,19 @@
 :root {
   --tlo: #f4f2ee; --karta: #ffffff; --tekst: #1d1b18; --szary: #6b665e; --linia: #dcd7cf;
   --akcent: #2f5d8a; --akcent-tlo: #e3edf7; --ok: #2e7d4f; --ok-tlo: #e2f2e8;
-  --uwaga: #b26a00; --uwaga-tlo: #fff1d6; --zle: #b3261e; --niepewne-tlo: #fff6bf; --pole: #ffffff;
+  --uwaga: #b26a00; --uwaga-tlo: #fff1d6; --zle: #b3261e; --niepewne-tlo: #fff6bf; --pole: #ffffff; --pole-ro: #f7f5f1;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --tlo: #191817; --karta: #232220; --tekst: #ece8e1; --szary: #a39d93; --linia: #3a3835;
     --akcent: #8db8e6; --akcent-tlo: #24323f; --ok: #7ccf9c; --ok-tlo: #1f3328;
-    --uwaga: #f0b45a; --uwaga-tlo: #3a2e1a; --zle: #ff8a80; --niepewne-tlo: #4a4214; --pole: #2b2a28;
+    --uwaga: #f0b45a; --uwaga-tlo: #3a2e1a; --zle: #ff8a80; --niepewne-tlo: #4a4214; --pole: #2b2a28; --pole-ro: #262523;
   }
 }
 :root[data-theme="dark"] {
   --tlo: #191817; --karta: #232220; --tekst: #ece8e1; --szary: #a39d93; --linia: #3a3835;
   --akcent: #8db8e6; --akcent-tlo: #24323f; --ok: #7ccf9c; --ok-tlo: #1f3328;
-  --uwaga: #f0b45a; --uwaga-tlo: #3a2e1a; --zle: #ff8a80; --niepewne-tlo: #4a4214; --pole: #2b2a28;
+  --uwaga: #f0b45a; --uwaga-tlo: #3a2e1a; --zle: #ff8a80; --niepewne-tlo: #4a4214; --pole: #2b2a28; --pole-ro: #262523;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
@@ -87,7 +87,9 @@ main { padding: 16px; max-width: 1280px; width: 100%; }
 .znaczek { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--uwaga-tlo); color: var(--uwaga); font-weight: 600; }
 .znaczek.ok { background: var(--ok-tlo); color: var(--ok); }
 .b-sprawdzone.wcisniety { background: var(--ok-tlo); border-color: var(--ok); color: var(--ok); }
-.karta .stopka { display: flex; justify-content: flex-end; margin-top: 8px; }
+.karta .stopka { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.karta .stopka button { padding: 8px 18px; }
+kbd { font-size: 11px; border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; opacity: .75; margin-left: 4px; }
 /* wycinek zostaje u góry ekranu, gdy przewijasz jego pola - nie trzeba wracać do góry */
 .obraz { overflow: auto; border: 1px solid var(--linia); border-radius: 6px; background: #fff; max-height: 42vh;
          position: sticky; top: var(--wys-naglowka, 53px); z-index: 5; box-shadow: 0 10px 14px -10px rgba(0, 0, 0, .55); }
@@ -155,8 +157,65 @@ body.www .tylko-lokalnie { display: none !important; }
 .okno-przyciski { display: flex; gap: 8px; justify-content: flex-end; }
 .toast { position: fixed; right: 18px; bottom: 18px; z-index: 60; background: var(--tekst); color: var(--tlo);
          padding: 10px 14px; border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .3); max-width: 420px; }
+/* karta w formacie Geneteki: łacina (pola obok siebie, etykieta nad polem), pod nią kolumny Geneteki A–S */
+.sekcja-karty { border: 1px solid var(--linia); border-radius: 8px; padding: 10px 14px 12px; margin-top: 10px; }
+.sekcja-karty h3 { font-size: 15px; margin: 0 0 8px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.sekcja-karty h3 .opis { color: var(--szary); font-weight: normal; font-size: 13px; }
+.sekcja-karty h3 .prawo { margin-left: auto; display: flex; gap: 8px; font-weight: normal; }
+.sekcja-karty .podpowiedz { color: var(--szary); font-size: 13px; margin: 0 0 8px; display: flex; }
+.siatka { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: flex-start; }
+.sekcja-karty .pole { display: flex; flex-direction: column; min-width: 80px; max-width: 100%; }
+.sekcja-karty .pole .etykieta { font-size: 12px; color: var(--szary); font-weight: 600; white-space: nowrap; }
+.sekcja-karty .pole.ma-flage .etykieta { color: var(--uwaga); }
+.sekcja-karty input, .sekcja-karty textarea, .sekcja-karty select { padding: 3px 7px; border: 1px solid var(--linia); border-radius: 5px;
+         background: var(--pole); min-height: 30px; scroll-margin-top: calc(var(--wys-naglowka, 53px) + 44vh); scroll-margin-bottom: 20px; }
+.sekcja-karty input:focus, .sekcja-karty textarea:focus, .sekcja-karty select:focus { outline: 2px solid var(--akcent); outline-offset: 0; }
+.sekcja-karty input::placeholder, .sekcja-karty textarea::placeholder { color: var(--szary); opacity: .75; font-style: italic; }
+.siatka .z-ptaszkiem > input { width: auto; flex: 0 1 auto; }
+.dlugie { margin-top: 8px; display: grid; gap: 6px; }
+.dlugie textarea { width: 100%; resize: vertical; overflow: hidden; line-height: 1.4; }
+.sekcja-laciny .podejrzane { border: 2px solid var(--uwaga); padding: 2px 6px; }
+.sekcja-laciny .niepewne { background: var(--niepewne-tlo); }
+.sekcja-laciny select.auto, .sekcja-laciny input.auto { font-style: italic; color: var(--szary); }
+.sekcja-laciny .pole.pusty { display: none; }
+#karty.pokaz-puste .sekcja-laciny .pole.pusty { display: flex; }
+.b-puste { font-size: 12.5px; padding: 2px 10px; }
+
+.wiersz-geneteki + .wiersz-geneteki { border-top: 1px dashed var(--linia); margin-top: 12px; padding-top: 10px; }
+.wiersz-geneteki h4 { font-size: 14px; margin: 0 0 6px; display: flex; gap: 10px; align-items: center; }
+.wiersz-geneteki h4 .opis { color: var(--szary); font-weight: normal; }
+.siatka-geneteki { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 8px; }
+.siatka-geneteki .pole { min-width: 0; }
+.siatka-geneteki .pole.szerokie { grid-column: 1 / -1; }
+.siatka-geneteki .pole.sredni { grid-column: span 2; }
+.siatka-geneteki .etykieta b { color: var(--tekst); }
+.siatka-geneteki .etykieta .litera { display: inline-block; min-width: 14px; color: var(--akcent); }
+.siatka-geneteki input, .siatka-geneteki textarea { width: 100%; min-width: 0; }
+.siatka-geneteki textarea { resize: vertical; min-height: 54px; line-height: 1.4; overflow: hidden; }
+.siatka-geneteki .tylko-odczyt { background: var(--pole-ro); color: var(--szary); }
+.sekcja-geneteki .ptaszek { cursor: pointer; }
+.do-sprawdzenia { background: var(--uwaga-tlo) !important; border: 2px solid var(--uwaga) !important; }
+.probka.do-sprawdzenia { border-width: 1px !important; }
+.powody { margin: 10px 0 0; padding: 8px 12px 8px 28px; background: var(--uwaga-tlo); border-radius: 6px; font-size: 13.5px; }
+.powody li { margin: 2px 0; }
+.powody button { font-size: 12px; padding: 1px 8px; margin-left: 6px; }
+.dopiski { margin: 8px 0 0; font-size: 13.5px; }
+.dopiski .dopisek { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; }
+.dopiski .dopisek span { flex: 1; }
+.lata { list-style: none; padding: 0; margin: 8px 0; }
+.lata li { display: flex; gap: 8px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--linia); }
+.lata li .info { color: var(--szary); font-size: 13px; margin-left: auto; text-align: right; }
+.lata li .info.uwaga { color: var(--uwaga); }
+#okno-cialo .lata input { width: auto; }
+#okno-cialo ul { margin: 0; padding-left: 20px; }
+
 @media (max-width: 900px) {
+  .siatka-geneteki .pole.sredni { grid-column: auto; }
   .uklad { grid-template-columns: 1fr; }
   aside { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--linia); }
   table.pola th.etykieta { width: 120px; }
 }
+/* link wyglądający jak przycisk (strona www: przejście do Weryfikacji Geneteka) */
+a.przycisk { border: 1px solid var(--linia); background: var(--karta); padding: 5px 10px; border-radius: 6px; color: var(--tekst);
+             text-decoration: none; display: inline-flex; align-items: center; }
+a.przycisk:hover { border-color: var(--akcent); }
