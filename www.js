@@ -154,7 +154,15 @@ window.WWW = (() => {
     let wynik = null, linki = null;
     for (const z of zapisy) {
       if (!z) continue;
-      wynik = { ...z };
+      // dane rocznika z pierwszego zapisu (z komputera); z kolejnych tylko nowsze „pobrano” (xlsx zapisany na stronie)
+      if (!wynik) wynik = { ...z };
+      else {
+        if (String(z.pobrano || '') > String(wynik.pobrano || '')) {
+          wynik.pobrano = z.pobrano;
+          wynik.zmiany_po_pobraniu = z.zmiany_po_pobraniu;
+        }
+        if (String(z.xlsx_geneteki || '') > String(wynik.xlsx_geneteki || '')) wynik.xlsx_geneteki = z.xlsx_geneteki;
+      }
       if (!linki || (+z.linki_zmieniono || 0) >= (+linki.linki_zmieniono || 0)) linki = z;
       for (const w of z.wycinki || []) {
         const k = String(w.wycinek), byl = wycinki.get(k);
