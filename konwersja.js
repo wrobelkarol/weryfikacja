@@ -409,10 +409,8 @@ export function konwertujAkt(wycinek, kontekst) {
     if (!pusty(p.mz_rodowe)) mz += ` z domu ${czyscKoniec(p.mz_rodowe)}`;
     seg['małżonek'] = mz;
   }
-  if (p.plec === 'M' && !pusty(p.zm_stan)) seg.stan = czyscKoniec(p.zm_stan);
-  if (p.plec === 'K' && !pusty(p.mz_stan)) seg['stan męża'] = czyscKoniec(p.mz_stan);
-  if (!pusty(p.oj_stan)) seg['stan ojca'] = czyscKoniec(p.oj_stan);
-  if (!pusty(p.ma_stan)) seg['stan matki'] = czyscKoniec(p.ma_stan);
+  // stanów (zmarłego, męża, ojca, matki) nie ma w uwagach (Weryfikacja, od 24.11.2026) – zostają: dom, wiek,
+  // przyczyna zgonu, małżonek, nr skanu
   // nr skanu: z Tartaka (pocięte/skany.json – z którego zdjęcia jest wycinek), a bez niego z zakresów linków
   const sk = nrZPliku(kontekst.skany && kontekst.skany[wycinek.wycinek]) ?? nrSkanu(wycinek.wycinek, linki);
   if (sk !== null) seg['nr skanu'] = String(sk);
