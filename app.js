@@ -63,8 +63,8 @@ const NAZWY_PARAFII = { Przytkowice: 'Przytkowice-Z-przenajswietszej-trojcy' };
 const SZEROKIE_GEN = new Set(['M']);
 const SREDNIE_GEN = new Set(['L', 'H', 'I']);
 // pola łaciny widoczne zawsze; pozostałe puste są schowane (przycisk „Pokaż puste pola”)
-// pola stanu/zawodu (zmarłego, ojca, matki, małżonka) – nie idą do Geneteki, więc w karcie ich nie ma (od 25.11.2026)
-const BEZ_STANOW = new Set(['zm_stan', 'oj_stan', 'ma_stan', 'mz_stan']);
+// pola, które nie idą do Geneteki, więc w karcie ich nie ma (od 25.11.2026): stany/zawody i przyczyna zgonu
+const BEZ_STANOW = new Set(['zm_stan', 'oj_stan', 'ma_stan', 'mz_stan', 'przyczyna']);
 const ZAWSZE_WIDOCZNE = new Set(['nr', 'miesiac', 'dzien_zgonu', 'dzien_pogrzebu', 'dom', 'katolik', 'plec', 'wiek',
   'przyczyna', 'typ', 'zm_imie', 'zm_nazwisko', 'tekst']);
 
@@ -607,6 +607,7 @@ function obliczFlagi() {
       }
     }
     for (const [k] of POLA) {
+      if (GENETEKA && BEZ_STANOW.has(k)) continue;      // pola niepokazywane – bez podświetleń
       if (/\[\s*łac\./i.test(P[k])) dodaj(k, 'AI zostawiło część po łacinie ([łac. …]) – do przetłumaczenia');
     }
     if (Object.keys(f).length) flagi.set(w.wycinek, f);
