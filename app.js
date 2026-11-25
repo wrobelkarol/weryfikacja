@@ -63,6 +63,8 @@ const NAZWY_PARAFII = { Przytkowice: 'Przytkowice-Z-przenajswietszej-trojcy' };
 const SZEROKIE_GEN = new Set(['M']);
 const SREDNIE_GEN = new Set(['L', 'H', 'I']);
 // pola łaciny widoczne zawsze; pozostałe puste są schowane (przycisk „Pokaż puste pola”)
+// pola stanu/zawodu (zmarłego, ojca, matki, małżonka) – nie idą do Geneteki, więc w karcie ich nie ma (od 25.11.2026)
+const BEZ_STANOW = new Set(['zm_stan', 'oj_stan', 'ma_stan', 'mz_stan']);
 const ZAWSZE_WIDOCZNE = new Set(['nr', 'miesiac', 'dzien_zgonu', 'dzien_pogrzebu', 'dom', 'katolik', 'plec', 'wiek',
   'przyczyna', 'typ', 'zm_imie', 'zm_nazwisko', 'tekst']);
 
@@ -1045,6 +1047,7 @@ function sekcjaLaciny(w) {
   const pola = w.rodzaj === 'akt' ? POLA
     : [['tekst', 'Tekst', 'dlugi'], ...(w.rodzaj === 'poswiadczenie' ? [['ksiadz', 'Ksiądz', 'tekst']] : [])];
   for (const [k, etykieta, rodzaj] of pola) {
+    if (BEZ_STANOW.has(k)) continue;           // stanów nie ma w formacie Geneteki – nie trzeba ich sprawdzać
     if (rodzaj === 'wspolne') dodaj(k, etykieta, pole(w, k, 'oba', false));
     else if (rodzaj === 'tak_nie') dodaj(k, etykieta, wybor(w, k, [['', '—'], ['tak', 'tak'], ['nie', 'nie']]));
     else if (rodzaj === 'plec') dodaj(k, etykieta, wybor(w, k, [['', '—'], ['M', 'M – mężczyzna'], ['K', 'K – kobieta']]));
