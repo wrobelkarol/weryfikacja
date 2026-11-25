@@ -399,11 +399,8 @@ export function konwertujAkt(wycinek, kontekst) {
   const w = wiek(p.wiek);
   if (w.tekst) seg.wiek = w.tekst;
   if (w.uwaga) flaga('M', w.uwaga);
-  const prz = przyczyny(p.przyczyna);
-  if (nn && p.typ === 'martwe_urodzenie' && !prz.some((x) => /martwo urodz/.test(x))) prz.push('martwo urodzone');
-  if (prz.length) seg['przyczyna zgonu'] = prz.join(', ');
-  if (/\[łac|\[\?|\?\]/.test(p.przyczyna || '')) flaga('M', 'przyczyna zgonu niedotłumaczona albo niepewna');
-  if (/\//.test(p.przyczyna || '')) flaga('M', `przyczyna z ukośnikiem: „${p.przyczyna}” (ukośnik zamieniony na spację) – sprawdź`);
+  // przyczyny zgonu nie ma w uwagach (Weryfikacja, od 25.11.2026); zostaje tylko informacja o martwym urodzeniu
+  const martwe = p.typ === 'martwe_urodzenie' || /martw\w* urodz|mortu\w* nat/i.test(p.przyczyna || '');
   if (!pusty(p.mz_imie) || !pusty(p.mz_nazwisko)) {
     let mz = `${czyscKoniec(p.mz_imie)} ${czyscKoniec(p.mz_nazwisko)}`.trim();
     if (!pusty(p.mz_rodowe)) mz += ` z domu ${czyscKoniec(p.mz_rodowe)}`;
@@ -414,7 +411,7 @@ export function konwertujAkt(wycinek, kontekst) {
   // nr skanu: z Tartaka (pocięte/skany.json – z którego zdjęcia jest wycinek), a bez niego z zakresów linków
   const sk = nrZPliku(kontekst.skany && kontekst.skany[wycinek.wycinek]) ?? nrSkanu(wycinek.wycinek, linki);
   if (sk !== null) seg['nr skanu'] = String(sk);
-  const M = SEGMENTY.filter((k) => seg[k]).map((k) => `${k}: ${seg[k]}`).join(', ');
+  const M = [...SEGMENTY.filter((k) => seg[k]).map((k) => `${k}: ${seg[k]}`), ...(martwe ? ['martwo urodzone'] : [])].join(', ');
 
   if (!pusty(p.dodatkowe)) {
     flaga('M', 'w akcie są dodatkowe informacje – dopisz do uwag tylko to, co jest w oryginale');

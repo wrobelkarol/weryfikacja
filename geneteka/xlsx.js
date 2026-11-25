@@ -115,15 +115,60 @@ function komorka(kol, nrWiersza, v) {
  * Plik xlsx Geneteki: szablon + wiersze (obiekty {A..S}) w arkuszu Zgony. Kolumna A (L.p.) jest numerowana od 1.
  * Zwraca Uint8Array.
  */
+// arkusze szablonu, których nie ma w pliku dla Geneteki (dane mają być tylko w arkuszu Zgony)
+const ZBEDNE = ['Słownik imion łacińskich', 'Uwagi'];
+
+/** Arkusz bez wierszy danych: zostają tylko wiersze z tekstem (nagłówki), znika np. ponumerowana kolumna L.p. */
+function tylkoNaglowki(xml) {
+  return xml.replace(/<row\b[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g, (wiersz) => (/\bt="(?:s|inlineStr|str)"/.test(wiersz) ? wiersz : ''));
+}
+
+/** Usuwa arkusz z pliku (workbook, powiązania, typy zawartości, lista w docProps/app.xml). */
+async function usunArkusz(zip, nazwa, sciezka) {
+  const nazwaXml = xmlEsc(nazwa);
+  let wb = await zip.file('xl/workbook.xml').async('string');
+  const tag = [...wb.matchAll(/<sheet\b[^>]*\/>/g)].map((m) => m[0]).find((t) => t.includes(`name="${nazwaXml}"`));
+  if (!tag) return;
+  const rid = (tag.match(/\br:id="([^"]+)"/) || [])[1];
+  zip.file('xl/workbook.xml', wb.replace(tag, ''));
+  let rels = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+  rels = rels.replace(new RegExp(`<Relationship\\b[^>]*\\bId="${rid}"[^>]*/>`), '');
+  zip.file('xl/_rels/workbook.xml.rels', rels);
+  const plik = sciezka.split('/').pop();
+  zip.remove(sciezka);
+  if (zip.file(`xl/worksheets/_rels/${plik}.rels`)) zip.remove(`xl/worksheets/_rels/${plik}.rels`);
+  let typy = await zip.file('[Content_Types].xml').async('string');
+  typy = typy.replace(new RegExp(`<Override PartName="/${sciezka.replace(/[.]/g, '\\.')}"[^>]*/>`), '');
+  zip.file('[Content_Types].xml', typy);
+  const app = zip.file('docProps/app.xml');
+  if (app) {
+    let x = await app.async('string');
+    if (x.includes(`<vt:lpstr>${nazwaXml}</vt:lpstr>`)) {
+      x = x.replace(`<vt:lpstr>${nazwaXml}</vt:lpstr>`, '')
+        .replace(/(<TitlesOfParts><vt:vector size=")(\d+)/, (_, a, n) => a + (+n - 1))
+        .replace(/(<vt:lpstr>Arkusze<\/vt:lpstr><\/vt:variant><vt:variant><vt:i4>)(\d+)/, (_, a, n) => a + (+n - 1));
+      zip.file('docProps/app.xml', x);
+    }
+  }
+}
+
 export async function zbudujXlsx(JSZip, szablon, wiersze) {
   const zip = await JSZip.loadAsync(szablon);
   const { sciezki, kolejnosc } = await arkusze(zip);
   const sciezkaZgonow = sciezki.Zgony;
   if (!sciezkaZgonow) throw new Error('W szablonie nie ma arkusza „Zgony”.');
 
-  // 1. tylko karta Zgony zaznaczona
+  // 0. dane tylko w arkuszu Zgony: bez słownika imion i instrukcji z szablonu (arkusze z ZBEDNE)
+  for (const nazwa of ZBEDNE) if (sciezki[nazwa]) await usunArkusz(zip, nazwa, sciezki[nazwa]);
+  for (const nazwa of ZBEDNE) {
+    delete sciezki[nazwa];
+    if (kolejnosc.includes(nazwa)) kolejnosc.splice(kolejnosc.indexOf(nazwa), 1);
+  }
+
+  // 1. tylko karta Zgony zaznaczona; w Urodzeniach i Małżeństwach same nagłówki (bez numerów L.p. z szablonu)
   for (const [nazwa, sciezka] of Object.entries(sciezki)) {
     let xml = await zip.file(sciezka).async('string');
+    if (nazwa !== 'Zgony') xml = tylkoNaglowki(xml);
     xml = xml.replace(/<sheetView\b[^>]*?>/g, (tag) => {
       let t = tag.replace(/\s+tabSelected="[^"]*"/g, '');
       if (nazwa === 'Zgony') t = t.replace(/<sheetView\b/, '<sheetView tabSelected="1"');

@@ -314,12 +314,13 @@ function pusteWartosci() {
   return Object.fromEntries(POLA.map(([k]) => [k, '']));
 }
 
-/* Uwagi bez pogrzebu (od 13.11.2026) i bez stanów zmarłego, męża, ojca i matki (od 24.11.2026) – także uwagi
+/* Uwagi bez pogrzebu (od 13.11.2026), bez stanów zmarłego, męża, ojca i matki (od 24.11.2026) i bez przyczyny zgonu (od 25.11.2026) – także uwagi
    poprawione wcześniej ręcznie; reszta tekstu (np. dopisane informacje z aktu) zostaje. */
 function bezPogrzebu(s) {
   return String(s ?? '')
     .replace(/(^|, )pogrzeb: \d{1,2}\.\d{1,2}\.\d{4}(?=, |$)/, '')
     .replace(/(^|, )stan(?: męża| ojca| matki)?: [^,]*(?=, |$)/g, '')
+    .replace(/(^|, )przyczyna zgonu: [^,]*(?:, (?![a-ząćęłńóśźż ]+: )[^,]*)*(?=, |$)/g, '')
     .replace(/^, /, '');
 }
 
