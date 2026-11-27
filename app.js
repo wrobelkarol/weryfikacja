@@ -1685,13 +1685,54 @@ async function pobierzGeneteke() {
     st.brudne = false;
     ustawStanZapisu(WWW ? 'Zapisano, xlsx pobrany' : 'Zapisano i zapisano xlsx');
     ustawStanWDrzewie('gotowe');
-    toast(d.komunikat || `Zapisano ${nazwa} w folderze ${d.folder}`);
+    let tekst = d.komunikat || `Zapisano ${nazwa} w folderze ${d.folder}`;
+    try {
+      const w = await scalWszystkoAuto();
+      if (w) tekst += ` Plik ze wszystkimi zgonami: ${w.nazwa} (${w.lat} lat, ${w.wierszy} wierszy)${w.komunikat ? ' – ' + w.komunikat : ' w ' + w.folder}.`;
+    } catch (e) {
+      tekst += ' (Pliku ze wszystkimi latami nie udało się zrobić: ' + e.message + ')';
+    }
+    toast(tekst);
     if (!WWW) pokazPropozycjeSlowniczka();         // słowniczek (prompt dla AI) jest na komputerze
   } catch (e) {
     toast('Nie udało się zapisać pliku xlsx: ' + e.message);
   } finally {
     przycisk.disabled = false;
   }
+}
+
+/** Czyta xlsx wybranych roczników, skleja wiersze zgonów i zapisuje jeden plik w folderze księgi. */
+async function zapiszScalone(folder, nazwa, wybrane) {
+  const wszystkie = [];
+  for (const p of wybrane) {
+    const sep = p.r.sciezka.includes('\\') ? '\\' : '/';
+    const adres = '/api/plik_xlsx?sciezka=' + enc(p.r.sciezka + sep + p.nazwa);
+    let bufor;
+    if (WWW) bufor = await WWW.binarny(adres);
+    else {
+      const r = await fetch(adres);
+      if (!r.ok) throw new Error(`nie udało się odczytać ${p.nazwa} (błąd ${r.status})`);
+      bufor = await r.arrayBuffer();
+    }
+    wszystkie.push(...await XL.czytajZgony(window.JSZip, bufor));
+  }
+  const plik = await XL.zbudujXlsx(window.JSZip, SZABLON, wszystkie);
+  const z = await (await API.post('/api/xlsx_scalone', { folder, nazwa, xlsx: naBase64(plik) })).json();
+  z.wierszy = wszystkie.length;
+  return z;
+}
+
+/** Po „Pobierz xlsx”: automatycznie jeden plik ze wszystkich roczników zgonów, które mają zapisany xlsx Geneteki. */
+async function scalWszystkoAuto() {
+  const d = await API.get('/api/geneteka_lata?sciezka=' + enc(st.sciezka));
+  const wybrane = d.lata.map((r) => ({ r, nazwa: nazwaXlsxGeneteki(d.parafia, r.rok) }))
+    .filter((p) => p.r.pliki.some((f) => f.normalize('NFC') === p.nazwa.normalize('NFC')))
+    .sort((a, b) => a.r.rok - b.r.rok);
+  if (wybrane.length < 2) return null;
+  const lata = wybrane.map((p) => p.r.rok);
+  const nazwa = nazwaXlsxGeneteki(d.parafia, `${lata[0]}-${lata[lata.length - 1]}`);
+  const z = await zapiszScalone(d.folder, nazwa, wybrane);
+  return { nazwa, wierszy: z.wierszy, lat: lata.length, folder: z.folder, komunikat: z.komunikat };
 }
 
 /* „Scal lata”: zapisane xlsx Geneteki kilku roczników w jeden plik (rocznik pod rocznikiem, ciągła L.p.)
@@ -1745,22 +1786,8 @@ async function scalLata() {
     ostrzezenia.length ? el('ul', {}, ostrzezenia.map((o) => el('li', { text: o }))) : null,
   ].filter(Boolean), ostrzezenia.length ? 'Scal mimo to' : 'Scal')) return;
   try {
-    const wszystkie = [];
-    for (const p of wybrane) {
-      const sep = p.r.sciezka.includes('\\') ? '\\' : '/';
-      const adres = '/api/plik_xlsx?sciezka=' + enc(p.r.sciezka + sep + p.nazwa);
-      let bufor;
-      if (WWW) bufor = await WWW.binarny(adres);
-      else {
-        const r = await fetch(adres);
-        if (!r.ok) throw new Error(`nie udało się odczytać ${p.nazwa} (błąd ${r.status})`);
-        bufor = await r.arrayBuffer();
-      }
-      wszystkie.push(...await XL.czytajZgony(window.JSZip, bufor));
-    }
-    const plik = await XL.zbudujXlsx(window.JSZip, SZABLON, wszystkie);
-    const z = await (await API.post('/api/xlsx_scalone', { folder: d.folder, nazwa, xlsx: naBase64(plik) })).json();
-    toast(z.komunikat || `Zapisano ${nazwa} (${wszystkie.length} wierszy) w folderze ${z.folder}`);
+    const z = await zapiszScalone(d.folder, nazwa, wybrane);
+    toast(z.komunikat || `Zapisano ${nazwa} (${z.wierszy} wierszy) w folderze ${z.folder}`);
   } catch (e) {
     toast('Nie udało się scalić lat: ' + e.message);
   }
