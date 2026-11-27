@@ -1989,7 +1989,7 @@ async function pokazPrompt() {
 }
 
 function pokazWgraj() {
-  const wejscie = el('input', { type: 'text', placeholder: 'np. C:\\Users\\...\\SKANY MAM DOŚĆ\\Przytkowice\\Zgony\\1890\\pocięte' });
+  const wejscie = el('input', { type: 'text', placeholder: 'np. /home/user/Pulpit/SKANY MAM DOŚĆ/Przytkowice/Zgony/1890/pocięte' });
   const otworz = () => { const s = wejscie.value.trim().replace(/^"|"$/g, ''); if (s) { zamknijOkno(); otworzFolder(s); } };
   wejscie.addEventListener('keydown', (e) => { if (e.key === 'Enter') otworz(); });
   okno('Wgraj skany', [
