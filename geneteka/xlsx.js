@@ -116,7 +116,7 @@ function komorka(kol, nrWiersza, v) {
  * Zwraca Uint8Array.
  */
 // arkusze szablonu, których nie ma w pliku dla Geneteki (dane mają być tylko w arkuszu Zgony)
-const ZBEDNE = ['Słownik imion łacińskich', 'Uwagi'];
+const ZBEDNE = []; // wszystkie arkusze szablonu zostają (Słownik imion łacińskich, Uwagi); dane tylko w Zgony
 
 /** Arkusz bez wierszy danych: zostają tylko wiersze z tekstem (nagłówki), znika np. ponumerowana kolumna L.p. */
 function tylkoNaglowki(xml) {
@@ -165,10 +165,10 @@ export async function zbudujXlsx(JSZip, szablon, wiersze) {
     if (kolejnosc.includes(nazwa)) kolejnosc.splice(kolejnosc.indexOf(nazwa), 1);
   }
 
-  // 1. tylko karta Zgony zaznaczona; w Urodzeniach i Małżeństwach same nagłówki (bez numerów L.p. z szablonu)
+  // 1. tylko karta Zgony zaznaczona; w Urodzeniach i Małżeństwach same nagłówki; Słownik i Uwagi bez zmian (bez numerów L.p. z szablonu)
   for (const [nazwa, sciezka] of Object.entries(sciezki)) {
     let xml = await zip.file(sciezka).async('string');
-    if (nazwa !== 'Zgony') xml = tylkoNaglowki(xml);
+    if (nazwa === 'Urodzenia' || nazwa === 'Małżeństwa') xml = tylkoNaglowki(xml);
     xml = xml.replace(/<sheetView\b[^>]*?>/g, (tag) => {
       let t = tag.replace(/\s+tabSelected="[^"]*"/g, '');
       if (nazwa === 'Zgony') t = t.replace(/<sheetView\b/, '<sheetView tabSelected="1"');
